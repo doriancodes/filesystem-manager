@@ -2,17 +2,14 @@ use super::constants::BLOCK_SIZE;
 use super::filesystem::{BoundEntry, HelloFS};
 use super::namespace::{BindMode, NamespaceEntry};
 use anyhow::{anyhow, Result};
-use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
-};
+use fuser::{FileAttr, FileType};
 use libc::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::ffi::CString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 #[cfg(target_os = "macos")]
 extern "C" {

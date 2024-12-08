@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use fuser::{FileAttr, FileType};
 use std::collections::HashMap;
 use std::ffi::OsString;

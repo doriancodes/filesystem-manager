@@ -1,12 +1,10 @@
 use anyhow::Result;
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
 };
-use libc::{ENOENT, MNT_FORCE, SIGINT, SIGTERM, SIG_ERR};
-use std::ffi::{OsStr, OsString};
+use libc::ENOENT;
+use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::time::UNIX_EPOCH;
 
 use super::constants::*;
 use super::namespace::NamespaceManager;
@@ -38,7 +36,7 @@ impl Filesystem for HelloFS {
 
         let bindings = self.namespace_manager.bindings.lock().unwrap();
 
-        for (inode, (entry_name, entry)) in bindings.iter() {
+        for (_inode, (entry_name, entry)) in bindings.iter() {
             if parent != 1 {
                 continue; // Only allow lookups in the root directory for now
             }
