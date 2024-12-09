@@ -9,6 +9,8 @@ use filesystem_manager::NineP;
 #[tokio::main]
 async fn main() -> Result<()> {
     // Create necessary directories first
+    let mount_point = Path::new("/tmp/mnt/ninep");
+    fs::create_dir_all(mount_point)?;
     fs::create_dir_all("/tmp/test")?;
     fs::create_dir_all("/tmp/test2")?;
 
@@ -37,11 +39,7 @@ async fn main() -> Result<()> {
 
     println!("Directory bound, about to mount");
     // Mount operation stays the same
-    fs_mngr.mount(
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test2"),
-        "remote_node_123",
-    )?;
+    fs_mngr.mount(Path::new("/tmp/test"), mount_point, "remote_node_123")?;
 
     println!("Mount complete");
     Ok(())

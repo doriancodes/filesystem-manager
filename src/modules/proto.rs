@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -389,19 +389,31 @@ impl Filesystem for NineP {
         println!("Lookup for parent: {}, name: {:?}", parent, name);
 
         let bindings = self.namespace_manager.bindings.lock().unwrap();
-        println!(
-            "Current bindings: {:?}",
-            bindings.keys().collect::<Vec<_>>()
-        );
+        println!("Current bindings: {:?}", bindings.keys());
 
-        // For each binding
         for (inode, (entry_name, entry)) in bindings.iter() {
-            println!("Checking entry: {:?} against name: {:?}", entry_name, name);
+            println!(
+                "Comparing entry name: {:?} with lookup name: {:?}",
+                entry_name, name
+            );
+
+            println!(
+                "inode: {}, name: {:?}, kind: {:?}",
+                inode, entry_name, entry.attr.kind
+            );
+
+            // Only check files in the root directory for now
             if parent != 1 {
-                continue; // Only allow lookups in the root directory for now
+                println!("Skipping non-root parent: {}", parent);
+                continue;
             }
-            // Compare just the final component of the path
-            if entry_name == name {
+
+            // Compare the actual filename without any path components
+            let entry_filename = Path::new(entry_name)
+                .file_name()
+                .unwrap_or_else(|| entry_name.as_os_str());
+
+            if entry_filename == name {
                 println!("Found match for {:?}", name);
                 reply.entry(&TTL, &entry.attr, 0);
                 return;
@@ -411,6 +423,33 @@ impl Filesystem for NineP {
         println!("No match found for {:?}", name);
         reply.error(ENOENT);
     }
+
+    // fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+    //     println!("Lookup for parent: {}, name: {:?}", parent, name);
+
+    //     let bindings = self.namespace_manager.bindings.lock().unwrap();
+    //     println!(
+    //         "Current bindings: {:?}",
+    //         bindings.keys().collect::<Vec<_>>()
+    //     );
+
+    //     // For each binding
+    //     for (inode, (entry_name, entry)) in bindings.iter() {
+    //         println!("Checking entry: {:?} against name: {:?}", entry_name, name);
+    //         if parent != 1 {
+    //             continue; // Only allow lookups in the root directory for now
+    //         }
+    //         // Compare just the final component of the path
+    //         if entry_name == name {
+    //             println!("Found match for {:?}", name);
+    //             reply.entry(&TTL, &entry.attr, 0);
+    //             return;
+    //         }
+    //     }
+
+    //     println!("No match found for {:?}", name);
+    //     reply.error(ENOENT);
+    // }
     // fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
     //     println!("Lookup for parent: {}, name: {:?}", parent, name); // DEBUG
     //     let bindings = self.namespace_manager.bindings.lock().unwrap();

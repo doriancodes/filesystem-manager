@@ -6,6 +6,7 @@ use fuser::{FileAttr, FileType};
 use libc::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs;
@@ -64,33 +65,170 @@ impl FilesystemManager {
         }
     }
 
-    fn read_directory_entries(&self, path: &Path) -> Result<HashMap<String, DirectoryEntry>> {
-        // Resolve the real path (handle symlinks)
-        let real_path = fs::canonicalize(path)?;
-        println!("Reading directory: {:?}", real_path);
+    fn read_directory_entries_recursive(
+        &self,
+        base_path: &Path,
+        current_path: &Path,
+        parent_inode: u64,
+        next_inode: &mut u64,
+        bindings: &mut HashMap<u64, (OsString, BoundEntry)>,
+    ) -> Result<()> {
+        println!("Reading directory recursively: {:?}", current_path);
+        let mut queue = VecDeque::new();
+        queue.push_back((current_path.to_path_buf(), parent_inode));
 
-        let mut entries = HashMap::new();
-        for entry in fs::read_dir(&real_path)? {
-            let entry = entry?;
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
-            let metadata = entry.metadata()?;
+        while let Some((path, parent)) = queue.pop_front() {
+            for entry in fs::read_dir(&path)? {
+                let entry = entry?;
+                let metadata = entry.metadata()?;
+                let entry_path = entry.path();
+                let relative_path = entry_path.strip_prefix(base_path)?;
 
-            println!("Found entry: {} at {:?}", name, path);
+                // Skip if this is the root directory itself
+                if relative_path.as_os_str().is_empty() {
+                    continue;
+                }
 
-            entries.insert(
-                name.clone(),
-                DirectoryEntry {
-                    name,
-                    path,
-                    metadata,
-                },
-            );
+                let inode = {
+                    let current = *next_inode;
+                    *next_inode += 1;
+                    current
+                };
+
+                let file_name = entry.file_name();
+                println!("Adding binding for: {:?} with inode: {}", file_name, inode);
+
+                let file_attr = self.create_file_attr(inode, &metadata);
+                let content = if metadata.is_file() {
+                    Some(fs::read(&entry_path)?)
+                } else {
+                    None
+                };
+
+                bindings.insert(
+                    inode,
+                    (
+                        file_name,
+                        BoundEntry {
+                            attr: file_attr,
+                            content,
+                        },
+                    ),
+                );
+
+                if metadata.is_dir() {
+                    queue.push_back((entry_path, inode));
+                }
+            }
         }
 
-        println!("Total entries found: {}", entries.len());
-        Ok(entries)
+        Ok(())
     }
+
+    // // Helper function to read directory entries recursively
+    // fn read_directory_entries_recursive(
+    //     &self,
+    //     base_path: &Path,
+    //     current_path: &Path,
+    //     parent_inode: u64,
+    //     next_inode: &mut u64,
+    //     bindings: &mut HashMap<u64, (OsString, BoundEntry)>,
+    // ) -> Result<()> {
+    //     let mut queue = VecDeque::new();
+    //     queue.push_back((current_path.to_path_buf(), parent_inode));
+
+    //     while let Some((path, parent)) = queue.pop_front() {
+    //         for entry in fs::read_dir(&path)? {
+    //             let entry = entry?;
+    //             let metadata = entry.metadata()?;
+    //             let entry_path = entry.path();
+    //             let relative_path = entry_path.strip_prefix(base_path)?;
+
+    //             // Create new inode
+    //             let inode = {
+    //                 let current = *next_inode;
+    //                 *next_inode += 1;
+    //                 current
+    //             };
+
+    //             let file_attr = self.create_file_attr(inode, &metadata);
+    //             // let file_attr = FileAttr {
+    //             //     ino: inode,
+    //             //     size: metadata.len(),
+    //             //     blocks: (metadata.len() + BLOCK_SIZE - 1) / BLOCK_SIZE,
+    //             //     atime: metadata.accessed().unwrap_or(UNIX_EPOCH),
+    //             //     mtime: metadata.modified().unwrap_or(UNIX_EPOCH),
+    //             //     ctime: UNIX_EPOCH,
+    //             //     crtime: UNIX_EPOCH,
+    //             //     kind: if metadata.is_dir() {
+    //             //         FileType::Directory
+    //             //     } else {
+    //             //         FileType::RegularFile
+    //             //     },
+    //             //     perm: 0o755,
+    //             //     nlink: 1,
+    //             //     uid: 501,
+    //             //     gid: 20,
+    //             //     rdev: 0,
+    //             //     flags: 0,
+    //             //     blksize: 512,
+    //             // };
+
+    //             let content = if metadata.is_file() {
+    //                 Some(fs::read(entry.path())?)
+    //             } else {
+    //                 None
+    //             };
+
+    //             // Insert the entry with its relative path
+    //             bindings.insert(
+    //                 inode,
+    //                 (
+    //                     relative_path.to_string_lossy().into_owned().into(),
+    //                     BoundEntry {
+    //                         attr: file_attr,
+    //                         content,
+    //                     },
+    //                 ),
+    //             );
+
+    //             // If it's a directory, add it to the queue
+    //             if metadata.is_dir() {
+    //                 queue.push_back((entry.path(), inode));
+    //             }
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
+
+    // fn read_directory_entries(&self, path: &Path) -> Result<HashMap<String, DirectoryEntry>> {
+    //     // Resolve the real path (handle symlinks)
+    //     let real_path = fs::canonicalize(path)?;
+    //     println!("Reading directory: {:?}", real_path);
+
+    //     let mut entries = HashMap::new();
+    //     for entry in fs::read_dir(&real_path)? {
+    //         let entry = entry?;
+    //         let path = entry.path();
+    //         let name = entry.file_name().to_string_lossy().to_string();
+    //         let metadata = entry.metadata()?;
+
+    //         println!("Found entry: {} at {:?}", name, path);
+
+    //         entries.insert(
+    //             name.clone(),
+    //             DirectoryEntry {
+    //                 name,
+    //                 path,
+    //                 metadata,
+    //             },
+    //         );
+    //     }
+
+    //     println!("Total entries found: {}", entries.len());
+    //     Ok(entries)
+    // }
 
     pub fn bind_directory(&self, dir_path: &str, source_path: &Path, mode: BindMode) -> Result<()> {
         println!(
@@ -103,146 +241,83 @@ impl FilesystemManager {
 
         // Convert paths to absolute paths
         let abs_source = fs::canonicalize(source_path)?;
+        let abs_target = fs::canonicalize(Path::new(dir_path))?;
 
-        println!("Reading source directory: {:?}", abs_source);
-        let source_entries = self.read_directory_entries(&abs_source)?;
+        println!(
+            "Resolved paths - source: {:?}, target: {:?}",
+            abs_source, abs_target
+        );
 
         match mode {
             BindMode::Replace => {
                 // Clear existing bindings but keep root
                 bindings.retain(|&ino, _| ino == 1);
 
-                for (_, entry) in source_entries {
-                    let inode = {
-                        let current = *next_inode;
-                        *next_inode += 1;
-                        current
-                    };
-
-                    println!("Adding binding for: {} with inode: {}", entry.name, inode);
-
-                    let file_attr = self.create_file_attr(inode, &entry.metadata);
-
-                    let content = if !entry.metadata.is_dir() {
-                        match fs::read(&entry.path) {
-                            Ok(content) => {
-                                println!("Read {} bytes from {:?}", content.len(), entry.path);
-                                Some(content)
-                            }
-                            Err(e) => {
-                                println!("Error reading {:?}: {}", entry.path, e);
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
-
-                    // Store just the file name, not the full path
-                    bindings.insert(
-                        inode,
-                        (
-                            std::ffi::OsString::from(&entry.name),
-                            BoundEntry {
-                                attr: file_attr,
-                                content,
-                            },
-                        ),
-                    );
-                }
+                // Read source directory recursively
+                self.read_directory_entries_recursive(
+                    &abs_source,
+                    &abs_source,
+                    1,
+                    &mut next_inode,
+                    &mut bindings,
+                )?;
             }
             BindMode::Before => {
                 let mut new_bindings = HashMap::new();
 
-                // Add source entries first
-                for (_, entry) in &source_entries {
-                    let inode = {
-                        let current = *next_inode;
-                        *next_inode += 1;
-                        current
-                    };
+                // Read source directory recursively
+                self.read_directory_entries_recursive(
+                    &abs_source,
+                    &abs_source,
+                    1,
+                    &mut next_inode,
+                    &mut new_bindings,
+                )?;
 
-                    let file_attr = self.create_file_attr(inode, &entry.metadata);
+                // Read target directory and add non-conflicting entries
+                let mut target_bindings = HashMap::new();
+                self.read_directory_entries_recursive(
+                    &abs_target,
+                    &abs_target,
+                    1,
+                    &mut next_inode,
+                    &mut target_bindings,
+                )?;
 
-                    let content = if !entry.metadata.is_dir() {
-                        Some(fs::read(&entry.path)?)
-                    } else {
-                        None
-                    };
-
-                    new_bindings.insert(
-                        inode,
-                        (
-                            std::ffi::OsString::from(&entry.name),
-                            BoundEntry {
-                                attr: file_attr,
-                                content,
-                            },
-                        ),
-                    );
+                for (inode, (path, entry)) in target_bindings {
+                    if !new_bindings.values().any(|(p, _)| p == &path) {
+                        new_bindings.insert(inode, (path, entry));
+                    }
                 }
 
                 bindings.extend(new_bindings);
             }
             BindMode::After => {
-                let mut existing_entries: HashMap<String, (std::ffi::OsString, BoundEntry)> =
-                    HashMap::new();
+                // Read target directory first
+                let mut target_bindings = HashMap::new();
+                self.read_directory_entries_recursive(
+                    &abs_target,
+                    &abs_target,
+                    1,
+                    &mut next_inode,
+                    &mut target_bindings,
+                )?;
 
-                // Keep existing entries (excluding root)
-                for (name, entry) in self.read_directory_entries(Path::new(dir_path))? {
-                    let inode = {
-                        let current = *next_inode;
-                        *next_inode += 1;
-                        current
-                    };
-
-                    let file_attr = self.create_file_attr(inode, &entry.metadata);
-
-                    let content = if !entry.metadata.is_dir() {
-                        Some(fs::read(&entry.path)?)
-                    } else {
-                        None
-                    };
-
-                    existing_entries.insert(
-                        name,
-                        (
-                            std::ffi::OsString::from(&entry.name),
-                            BoundEntry {
-                                attr: file_attr,
-                                content,
-                            },
-                        ),
-                    );
-                }
+                bindings.extend(target_bindings);
 
                 // Add non-conflicting source entries
-                for (name, entry) in source_entries {
-                    if !existing_entries.contains_key(&name) {
-                        let inode = {
-                            let current = *next_inode;
-                            *next_inode += 1;
-                            current
-                        };
+                let mut source_bindings = HashMap::new();
+                self.read_directory_entries_recursive(
+                    &abs_source,
+                    &abs_source,
+                    1,
+                    &mut next_inode,
+                    &mut source_bindings,
+                )?;
 
-                        let file_attr = self.create_file_attr(inode, &entry.metadata);
-
-                        let content = if !entry.metadata.is_dir() {
-                            Some(fs::read(&entry.path)?)
-                        } else {
-                            None
-                        };
-
-                        bindings.insert(
-                            inode,
-                            (
-                                std::ffi::OsString::from(&entry.name),
-                                BoundEntry {
-                                    attr: file_attr,
-                                    content,
-                                },
-                            ),
-                        );
+                for (inode, (path, entry)) in source_bindings {
+                    if !bindings.values().any(|(p, _)| p == &path) {
+                        bindings.insert(inode, (path, entry));
                     }
                 }
             }
@@ -250,42 +325,229 @@ impl FilesystemManager {
                 // Clear existing bindings but keep root
                 bindings.retain(|&ino, _| ino == 1);
 
-                for (_, entry) in source_entries {
-                    let inode = {
-                        let current = *next_inode;
-                        *next_inode += 1;
-                        current
-                    };
+                // Read source directory recursively
+                let mut new_bindings = HashMap::new();
+                self.read_directory_entries_recursive(
+                    &abs_source,
+                    &abs_source,
+                    1,
+                    &mut next_inode,
+                    &mut new_bindings,
+                )?;
 
-                    let mut file_attr = self.create_file_attr(inode, &entry.metadata);
-                    file_attr.perm &= 0o555; // Make read-only
-
-                    let content = if !entry.metadata.is_dir() {
-                        Some(fs::read(&entry.path)?)
-                    } else {
-                        None
-                    };
-
-                    bindings.insert(
-                        inode,
-                        (
-                            std::ffi::OsString::from(&entry.name),
-                            BoundEntry {
-                                attr: file_attr,
-                                content,
-                            },
-                        ),
-                    );
+                // Make all entries read-only
+                for (_, (_, entry)) in new_bindings.iter_mut() {
+                    entry.attr.perm &= 0o555;
                 }
+
+                bindings.extend(new_bindings);
             }
         }
 
-        println!(
-            "Current bindings after operation: {:?}",
-            bindings.keys().collect::<Vec<_>>()
-        );
+        println!("Final bindings: {:?}", bindings.keys().collect::<Vec<_>>());
+        for (inode, (name, entry)) in bindings.iter() {
+            println!(
+                "inode: {}, name: {:?}, kind: {:?}",
+                inode, name, entry.attr.kind
+            );
+        }
         Ok(())
     }
+
+    // pub fn bind_directory(&self, dir_path: &str, source_path: &Path, mode: BindMode) -> Result<()> {
+    //     println!(
+    //         "Binding directory: {} from source: {:?}",
+    //         dir_path, source_path
+    //     );
+
+    //     let mut bindings = self.fs.namespace_manager.bindings.lock().unwrap();
+    //     let mut next_inode = self.fs.namespace_manager.next_inode.lock().unwrap();
+
+    //     // Convert paths to absolute paths
+    //     let abs_source = fs::canonicalize(source_path)?;
+
+    //     println!("Reading source directory: {:?}", abs_source);
+    //     let source_entries = self.read_directory_entries(&abs_source)?;
+
+    //     match mode {
+    //         BindMode::Replace => {
+    //             // Clear existing bindings but keep root
+    //             bindings.retain(|&ino, _| ino == 1);
+
+    //             for (_, entry) in source_entries {
+    //                 let inode = {
+    //                     let current = *next_inode;
+    //                     *next_inode += 1;
+    //                     current
+    //                 };
+
+    //                 println!("Adding binding for: {} with inode: {}", entry.name, inode);
+
+    //                 let file_attr = self.create_file_attr(inode, &entry.metadata);
+
+    //                 let content = if !entry.metadata.is_dir() {
+    //                     match fs::read(&entry.path) {
+    //                         Ok(content) => {
+    //                             println!("Read {} bytes from {:?}", content.len(), entry.path);
+    //                             Some(content)
+    //                         }
+    //                         Err(e) => {
+    //                             println!("Error reading {:?}: {}", entry.path, e);
+    //                             None
+    //                         }
+    //                     }
+    //                 } else {
+    //                     None
+    //                 };
+
+    //                 // Store just the file name, not the full path
+    //                 bindings.insert(
+    //                     inode,
+    //                     (
+    //                         std::ffi::OsString::from(&entry.name),
+    //                         BoundEntry {
+    //                             attr: file_attr,
+    //                             content,
+    //                         },
+    //                     ),
+    //                 );
+    //             }
+    //         }
+    //         BindMode::Before => {
+    //             let mut new_bindings = HashMap::new();
+
+    //             // Add source entries first
+    //             for (_, entry) in &source_entries {
+    //                 let inode = {
+    //                     let current = *next_inode;
+    //                     *next_inode += 1;
+    //                     current
+    //                 };
+
+    //                 let file_attr = self.create_file_attr(inode, &entry.metadata);
+
+    //                 let content = if !entry.metadata.is_dir() {
+    //                     Some(fs::read(&entry.path)?)
+    //                 } else {
+    //                     None
+    //                 };
+
+    //                 new_bindings.insert(
+    //                     inode,
+    //                     (
+    //                         std::ffi::OsString::from(&entry.name),
+    //                         BoundEntry {
+    //                             attr: file_attr,
+    //                             content,
+    //                         },
+    //                     ),
+    //                 );
+    //             }
+
+    //             bindings.extend(new_bindings);
+    //         }
+    //         BindMode::After => {
+    //             let mut existing_entries: HashMap<String, (std::ffi::OsString, BoundEntry)> =
+    //                 HashMap::new();
+
+    //             // Keep existing entries (excluding root)
+    //             for (name, entry) in self.read_directory_entries(Path::new(dir_path))? {
+    //                 let inode = {
+    //                     let current = *next_inode;
+    //                     *next_inode += 1;
+    //                     current
+    //                 };
+
+    //                 let file_attr = self.create_file_attr(inode, &entry.metadata);
+
+    //                 let content = if !entry.metadata.is_dir() {
+    //                     Some(fs::read(&entry.path)?)
+    //                 } else {
+    //                     None
+    //                 };
+
+    //                 existing_entries.insert(
+    //                     name,
+    //                     (
+    //                         std::ffi::OsString::from(&entry.name),
+    //                         BoundEntry {
+    //                             attr: file_attr,
+    //                             content,
+    //                         },
+    //                     ),
+    //                 );
+    //             }
+
+    //             // Add non-conflicting source entries
+    //             for (name, entry) in source_entries {
+    //                 if !existing_entries.contains_key(&name) {
+    //                     let inode = {
+    //                         let current = *next_inode;
+    //                         *next_inode += 1;
+    //                         current
+    //                     };
+
+    //                     let file_attr = self.create_file_attr(inode, &entry.metadata);
+
+    //                     let content = if !entry.metadata.is_dir() {
+    //                         Some(fs::read(&entry.path)?)
+    //                     } else {
+    //                         None
+    //                     };
+
+    //                     bindings.insert(
+    //                         inode,
+    //                         (
+    //                             std::ffi::OsString::from(&entry.name),
+    //                             BoundEntry {
+    //                                 attr: file_attr,
+    //                                 content,
+    //                             },
+    //                         ),
+    //                     );
+    //                 }
+    //             }
+    //         }
+    //         BindMode::Create => {
+    //             // Clear existing bindings but keep root
+    //             bindings.retain(|&ino, _| ino == 1);
+
+    //             for (_, entry) in source_entries {
+    //                 let inode = {
+    //                     let current = *next_inode;
+    //                     *next_inode += 1;
+    //                     current
+    //                 };
+
+    //                 let mut file_attr = self.create_file_attr(inode, &entry.metadata);
+    //                 file_attr.perm &= 0o555; // Make read-only
+
+    //                 let content = if !entry.metadata.is_dir() {
+    //                     Some(fs::read(&entry.path)?)
+    //                 } else {
+    //                     None
+    //                 };
+
+    //                 bindings.insert(
+    //                     inode,
+    //                     (
+    //                         std::ffi::OsString::from(&entry.name),
+    //                         BoundEntry {
+    //                             attr: file_attr,
+    //                             content,
+    //                         },
+    //                     ),
+    //                 );
+    //             }
+    //         }
+    //     }
+
+    //     println!(
+    //         "Current bindings after operation: {:?}",
+    //         bindings.keys().collect::<Vec<_>>()
+    //     );
+    //     Ok(())
+    // }
 
     pub fn bind(&self, source: &Path, target: &Path, mode: BindMode) -> Result<()> {
         println!("Binding {:?} to {:?} with mode {:?}", source, target, mode);

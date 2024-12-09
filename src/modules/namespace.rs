@@ -41,7 +41,7 @@ impl NamespaceManager {
         bindings.insert(
             ROOT_INODE,
             (
-                OsString::from(&root),
+                OsString::from("."),
                 BoundEntry {
                     attr: create_root_attr(),
                     content: None,
