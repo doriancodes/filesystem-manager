@@ -8,28 +8,41 @@ use filesystem_manager::NineP;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Create HelloFS with /tmp as root
-    let hello_fs = NineP::new(PathBuf::from("/tmp"))?;
+    // Create necessary directories first
+    fs::create_dir_all("/tmp/test")?;
+    fs::create_dir_all("/tmp/test2")?;
+
+    // Add some test files
+    fs::write("/tmp/test2/file1.txt", "test1")?;
+    fs::write("/tmp/test2/file2.txt", "test2")?;
+
+    println!("Created test files");
+    println!("Contents of /tmp/test2:");
+    for entry in fs::read_dir("/tmp/test2")? {
+        let entry = entry?;
+        println!("{:?}", entry.path());
+    }
+
+    // Create NineP filesystem with /tmp/test as root
+    let hello_fs = NineP::new(PathBuf::from("/tmp/test"))?;
     let fs_mngr = FilesystemManager::new(hello_fs);
 
-    // Create necessary directories
-    fs::create_dir_all("/tmp/source")?;
-    fs::create_dir_all("/tmp/target")?;
-    fs::create_dir_all("/tmp/mount_point")?;
-
-    // Perform bind operation
+    println!("About to bind directories");
+    // Perform bind operation - swap source and target
     fs_mngr.bind(
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test2"),
+        Path::new("/tmp/test2"), // This should be source
+        Path::new("/tmp/test"),  // This should be target
         BindMode::Replace,
     )?;
 
-    // Perform mount operation
+    println!("Directory bound, about to mount");
+    // Mount operation stays the same
     fs_mngr.mount(
         Path::new("/tmp/test"),
         Path::new("/tmp/test2"),
         "remote_node_123",
     )?;
 
+    println!("Mount complete");
     Ok(())
 }
