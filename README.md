@@ -15,12 +15,12 @@ mountpoint.
 - **Example use cases**:
   - Temporarily replacing a default configuration directory with a test or alternative version
   ```shell
-    bind /test/config /etc
+    frg bind /test/config /etc
   ```
   After this, processes see `/test/config` contents instead of the original `/etc`.
   - Redirecting access to `/bin` to a custom toolchain directory for development:
   ```shell
-    bind /custom/tools/bin /bin
+    frg bind /custom/tools/bin /bin
   ```
 
 ### Before binding `bind -b src mountpoint`
@@ -31,7 +31,7 @@ a Plan9 file system searches `src` first, and if the file isn't found there, it 
   - Overlaying new tools or files over existing directories without completely replacing them. For example,
   adding custom binaries that take precedence over system binaries:
   ```shell
-    bind -b /custom/bin /bin
+    frg bind -b /custom/bin /bin
   ```
   In this case, `/custom/bin/ls` will be used instead of `/bin/ls` if both exist.
 - **Example**: Temporarily prioritizing a new set of libraries or data over the default paths for testing or debugging.
@@ -43,12 +43,12 @@ This mode appends the `src` to the `mountpoint`'s search path. Plan 9 resolves l
 - **Use case**:
   - Adding extra directories to extend a namespace without interfering with its current operation. For example, appending a directory with additional fonts:
   ```shell
-    bind -a /extra/fonts /fonts
+    frg bind -a /extra/fonts /fonts
   ```
   Here, `/fonts` will use default system fonts first and fall back to `/extra/fonts` if needed.
 - **Example**: Supplementing a default configuration directory with additional files:
   ```shell
-    bind -a /additional/config /etc
+    frg bind -a /additional/config /etc
   ```
   This ensures `/etc` retains its default behavior but gains the additional configuration files if the defaults don’t exist.
 
@@ -56,8 +56,8 @@ This mode appends the `src` to the `mountpoint`'s search path. Plan 9 resolves l
 Using `bind -b` and `bind -a`, you can create union directories where files from multiple sources appear merged.
 For example:
 ```shell
-bind -b /local/bin /bin
-bind -a /backup/bin /bin
+frg bind -b /local/bin /bin
+frg bind -a /backup/bin /bin
 ```
 This setup prioritizes `/local/bin`, followed by `/bin`, and finally `/backup/bin`.
 

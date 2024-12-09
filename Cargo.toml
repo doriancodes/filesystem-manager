@@ -4,6 +4,10 @@ description = "🐸 Simple file system implementation using the 9P protocol"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "frg"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0"
 fuser = "0.15.1"
