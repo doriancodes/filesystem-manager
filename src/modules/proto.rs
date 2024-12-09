@@ -1,20 +1,53 @@
 use super::constants::*;
 use super::namespace::NamespaceManager;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
 };
 use libc::ENOENT;
 use std::collections::HashMap;
-use std::ffi::OsStr;
+use std::convert::TryFrom;
+use std::ffi::{OsStr, OsString};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 // 9P protocol constants
 const QTDIR: u8 = 0x80;
 const QTAPPEND: u8 = 0x40;
 const QTEXCL: u8 = 0x20;
 const QTAUTH: u8 = 0x08;
+
+// File access modes
+#[derive(Debug, Clone, Copy)]
+pub struct OpenFlags(pub u32);
+
+impl OpenFlags {
+    pub const O_RDONLY: u32 = 0x00;
+    pub const O_WRONLY: u32 = 0x01;
+    pub const O_RDWR: u32 = 0x02;
+    pub const O_EXEC: u32 = 0x03;
+    pub const O_TRUNC: u32 = 0x10;
+}
+
+// Helper struct for file stats
+#[derive(Debug, Clone)]
+pub struct Stat {
+    pub size: u16,    // Total size of stat message
+    pub typ: u16,     // For kernel use
+    pub dev: u32,     // For kernel use
+    pub qid: Qid,     // Unique id from server
+    pub mode: u32,    // Permissions and flags
+    pub atime: u32,   // Last access time
+    pub mtime: u32,   // Last modification time
+    pub length: u64,  // Length of file in bytes
+    pub name: String, // File name
+    pub uid: String,  // Owner name
+    pub gid: String,  // Group name
+    pub muid: String, // Name of last modifier
+}
 
 #[derive(Debug, Clone)]
 pub struct BoundEntry {
@@ -65,6 +98,289 @@ impl NineP {
                 0
             },
         }
+    }
+
+    // Version negotiation
+    pub fn version(&mut self, requested_version: &str, msize: u32) -> Result<(u32, String)> {
+        self.msize = std::cmp::min(msize, 8192); // Cap at 8K
+        let version = if requested_version == "9P2000" {
+            "9P2000".to_string()
+        } else {
+            "unknown".to_string()
+        };
+        self.version = version.clone();
+        Ok((self.msize, version))
+    }
+
+    // Authentication
+    pub fn auth(&mut self, uname: &str, aname: &str, afid: u32) -> Result<Qid> {
+        // For this implementation, we'll return an error as we're not implementing auth
+        Err(anyhow!("Authentication not required"))
+    }
+
+    // Attach to the filesystem
+    pub fn attach(&mut self, fid: u32, afid: Option<u32>, uname: &str, aname: &str) -> Result<Qid> {
+        let mut fids = self.fids.lock().unwrap();
+        fids.insert(fid, PathBuf::from("/"));
+
+        Ok(Qid {
+            version: 0,
+            path: 1, // Root directory
+            file_type: QTDIR,
+        })
+    }
+
+    // Walk the file tree
+    pub fn walk(&mut self, fid: u32, newfid: u32, wnames: &[String]) -> Result<Vec<Qid>> {
+        let mut qids = Vec::new();
+        let fids = self.fids.lock().unwrap();
+
+        // Get starting path
+        let start_path = fids
+            .get(&fid)
+            .ok_or_else(|| anyhow!("Invalid fid"))?
+            .clone();
+
+        let mut current_path = start_path;
+        let bindings = self.namespace_manager.bindings.lock().unwrap();
+
+        for name in wnames {
+            current_path.push(name);
+
+            // Find the entry in bindings
+            let mut found = false;
+            for (_, (entry_name, entry)) in bindings.iter() {
+                if entry_name.to_string_lossy() == name.as_str() {
+                    qids.push(Self::qid_from_attr(&entry.attr));
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                return Err(anyhow!("Path not found"));
+            }
+        }
+
+        // Update newfid with final path if walk was successful
+        if !qids.is_empty() {
+            let mut fids = self.fids.lock().unwrap();
+            fids.insert(newfid, current_path);
+        }
+
+        Ok(qids)
+    }
+
+    // Open a file
+    pub fn open(&mut self, fid: u32, flags: OpenFlags) -> Result<(Qid, u32)> {
+        let fids = self.fids.lock().unwrap();
+        let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
+
+        let bindings = self.namespace_manager.bindings.lock().unwrap();
+
+        // Find the entry
+        for (_, (entry_name, entry)) in bindings.iter() {
+            if entry_name.to_string_lossy() == path.to_string_lossy() {
+                let qid = Self::qid_from_attr(&entry.attr);
+                return Ok((qid, self.msize));
+            }
+        }
+
+        Err(anyhow!("File not found"))
+    }
+
+    // Create a new file
+    pub fn create(
+        &mut self,
+        fid: u32,
+        name: &str,
+        perm: u32,
+        mode: OpenFlags,
+    ) -> Result<(Qid, u32)> {
+        let fids = self.fids.lock().unwrap();
+        let parent_path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
+
+        let mut new_path = parent_path.clone();
+        new_path.push(name);
+
+        let mut bindings = self.namespace_manager.bindings.lock().unwrap();
+        let mut next_inode = self.namespace_manager.next_inode.lock().unwrap();
+
+        let inode = *next_inode;
+        *next_inode += 1;
+
+        let attr = FileAttr {
+            ino: inode,
+            size: 0,
+            blocks: 0,
+            atime: SystemTime::now(),
+            mtime: SystemTime::now(),
+            ctime: SystemTime::now(),
+            crtime: SystemTime::now(),
+            kind: FileType::RegularFile,
+            perm: perm as u16,
+            nlink: 1,
+            uid: 501,
+            gid: 20,
+            rdev: 0,
+            flags: 0,
+            blksize: 512,
+        };
+
+        let entry = BoundEntry {
+            attr,
+            content: Some(Vec::new()),
+        };
+
+        bindings.insert(inode, (OsString::from(name), entry));
+
+        Ok((
+            Qid {
+                version: 0,
+                path: inode,
+                file_type: 0,
+            },
+            self.msize,
+        ))
+    }
+
+    // Read from a file
+    pub fn read(&self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
+        let fids = self.fids.lock().unwrap();
+        let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
+
+        let bindings = self.namespace_manager.bindings.lock().unwrap();
+
+        for (_, (_, entry)) in bindings.iter() {
+            if let Some(ref content) = entry.content {
+                let start = offset as usize;
+                let end = std::cmp::min(start + count as usize, content.len());
+                return Ok(content[start..end].to_vec());
+            }
+        }
+
+        Err(anyhow!("File not found"))
+    }
+
+    // Write to a file
+    pub fn write(&mut self, fid: u32, offset: u64, data: &[u8]) -> Result<u32> {
+        let fids = self.fids.lock().unwrap();
+        let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
+
+        let mut bindings = self.namespace_manager.bindings.lock().unwrap();
+
+        for (_, (_, entry)) in bindings.iter_mut() {
+            if let Some(ref mut content) = entry.content {
+                let start = offset as usize;
+                let end = start + data.len();
+
+                if end > content.len() {
+                    content.resize(end, 0);
+                }
+
+                content[start..end].copy_from_slice(data);
+                return Ok(data.len() as u32);
+            }
+        }
+
+        Err(anyhow!("File not found"))
+    }
+
+    // Close a file
+    pub fn clunk(&mut self, fid: u32) -> Result<()> {
+        let mut fids = self.fids.lock().unwrap();
+        if fids.remove(&fid).is_some() {
+            Ok(())
+        } else {
+            Err(anyhow!("Invalid fid"))
+        }
+    }
+
+    // Remove a file
+    pub fn remove(&mut self, fid: u32) -> Result<()> {
+        let mut fids = self.fids.lock().unwrap();
+        let path = fids.remove(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
+
+        let mut bindings = self.namespace_manager.bindings.lock().unwrap();
+
+        // Find and remove the entry
+        let mut found_inode = None;
+        for (inode, (entry_name, _)) in bindings.iter() {
+            if entry_name.to_string_lossy() == path.to_string_lossy() {
+                found_inode = Some(*inode);
+                break;
+            }
+        }
+
+        if let Some(inode) = found_inode {
+            bindings.remove(&inode);
+            Ok(())
+        } else {
+            Err(anyhow!("File not found"))
+        }
+    }
+
+    // Get file/directory attributes
+    pub fn stat(&self, fid: u32) -> Result<Stat> {
+        let fids = self.fids.lock().unwrap();
+        let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
+
+        let bindings = self.namespace_manager.bindings.lock().unwrap();
+
+        for (_, (entry_name, entry)) in bindings.iter() {
+            if entry_name.to_string_lossy() == path.to_string_lossy() {
+                return Ok(Stat {
+                    size: 0, // Will be filled by protocol
+                    typ: 0,
+                    dev: 0,
+                    qid: Self::qid_from_attr(&entry.attr),
+                    mode: entry.attr.perm as u32,
+                    atime: entry
+                        .attr
+                        .atime
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as u32,
+                    mtime: entry
+                        .attr
+                        .mtime
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as u32,
+                    length: entry.attr.size,
+                    name: entry_name.to_string_lossy().to_string(),
+                    uid: "user".to_string(),
+                    gid: "user".to_string(),
+                    muid: "user".to_string(),
+                });
+            }
+        }
+
+        Err(anyhow!("File not found"))
+    }
+
+    // Modify file/directory attributes
+    pub fn wstat(&mut self, fid: u32, stat: &Stat) -> Result<()> {
+        let fids = self.fids.lock().unwrap();
+        let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
+
+        let mut bindings = self.namespace_manager.bindings.lock().unwrap();
+
+        for (_, (_, entry)) in bindings.iter_mut() {
+            let mut attr = entry.attr;
+            attr.perm = stat.mode as u16;
+            // Update other attributes as needed
+            entry.attr = attr;
+            return Ok(());
+        }
+
+        Err(anyhow!("File not found"))
+    }
+
+    // Flush a pending operation
+    pub fn flush(&mut self, oldtag: u16) -> Result<()> {
+        // In this implementation, we don't queue operations, so flush is a no-op
+        Ok(())
     }
 }
 
