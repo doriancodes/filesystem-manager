@@ -1,10 +1,9 @@
 use anyhow::Result;
-use std::fs;
-use std::path::{Path, PathBuf};
-
 use filesystem_manager::modules::namespace::BindMode;
 use filesystem_manager::FilesystemManager;
 use filesystem_manager::NineP;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,7 +16,6 @@ async fn main() -> Result<()> {
     // Add some test files
     fs::write("/tmp/test2/file1.txt", "test1")?;
     fs::write("/tmp/test2/file2.txt", "test2")?;
-
     println!("Created test files");
     println!("Contents of /tmp/test2:");
     for entry in fs::read_dir("/tmp/test2")? {
@@ -34,11 +32,11 @@ async fn main() -> Result<()> {
     fs_mngr.bind(
         Path::new("/tmp/test2"), // This should be source
         Path::new("/tmp/test"),  // This should be target
-        BindMode::Replace,
+        BindMode::Before,
     )?;
 
     println!("Directory bound, about to mount");
-    // Mount operation stays the same
+    // Mount the NineP filesystem to /tmp/mnt/ninep
     fs_mngr.mount(Path::new("/tmp/test"), mount_point, "remote_node_123")?;
 
     println!("Mount complete");
