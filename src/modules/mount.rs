@@ -13,6 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::UNIX_EPOCH;
+use log::{debug, error, info, trace};
 
 #[cfg(target_os = "macos")]
 extern "C" {
@@ -73,7 +74,7 @@ impl FilesystemManager {
         next_inode: &mut u64,
         bindings: &mut HashMap<u64, (OsString, BoundEntry)>,
     ) -> Result<()> {
-        println!("Reading directory recursively: {:?}", current_path);
+        debug!("Reading directory recursively: {:?}", current_path);
         let mut queue = VecDeque::new();
         queue.push_back((current_path.to_path_buf(), parent_inode));
 
@@ -96,7 +97,7 @@ impl FilesystemManager {
                 };
 
                 let file_name = entry.file_name();
-                println!("Adding binding for: {:?} with inode: {}", file_name, inode);
+                debug!("Adding binding for: {:?} with inode: {}", file_name, inode);
 
                 let file_attr = self.create_file_attr(inode, &metadata);
                 let content = if metadata.is_file() {
@@ -250,7 +251,7 @@ impl FilesystemManager {
     }
 
     pub fn bind(&self, source: &Path, target: &Path, mode: BindMode) -> Result<()> {
-        println!("Binding {:?} to {:?} with mode {:?}", source, target, mode);
+        info!("Binding {:?} to {:?} with mode {:?}", source, target, mode);
 
         let abs_source = fs::canonicalize(source)?;
         let abs_target = fs::canonicalize(target)?;

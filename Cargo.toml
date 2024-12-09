@@ -2,6 +2,13 @@
 name = "frogger"
 description = "🐸 Simple file system implementation using the 9P protocol"
 version = "0.1.0"
+authors = ["Dorian Davì <frogger.clock688@passinbox.com>"]
+license = "BSD-3-Clause"
+repository = "https://github.com/doriancodes/frogger"
+documentation = "https://docs.rs/frogger"
+readme = "README.md"
+keywords = ["filesystem", "9p", "fuse", "bind"]
+categories = ["filesystem", "os::unix-apis"]
 edition = "2021"
 
 [[bin]]
@@ -15,7 +22,28 @@ libc = "0.2"
 signal-hook = "0.3"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4.4", features = ["derive"] }
+log = "0.4"
+env_logger = "0.10"
 
 [dev-dependencies]
 tempfile = "3.2"
 tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true
+debug = false
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+

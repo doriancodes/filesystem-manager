@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
+use log::{debug, error, info, trace};
 
 // 9P protocol constants
 const QTDIR: u8 = 0x80;
@@ -516,41 +517,42 @@ impl NineP {
 
 impl Filesystem for NineP {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        println!("Lookup for parent: {}, name: {:?}", parent, name);
+        debug!("Lookup for parent: {}, name: {:?}", parent, name);
 
         let bindings = self.namespace_manager.bindings.lock().unwrap();
-        println!("Current bindings: {:?}", bindings.keys());
+        trace!("Current bindings: {:?}", bindings.keys());
 
         for (inode, (entry_name, entry)) in bindings.iter() {
-            println!(
+            trace!(
                 "Comparing entry name: {:?} with lookup name: {:?}",
-                entry_name, name
+                entry_name,
+                name
             );
 
-            println!(
+            trace!(
                 "inode: {}, name: {:?}, kind: {:?}",
-                inode, entry_name, entry.attr.kind
+                inode,
+                entry_name,
+                entry.attr.kind
             );
 
-            // Only check files in the root directory for now
             if parent != 1 {
-                println!("Skipping non-root parent: {}", parent);
+                debug!("Skipping non-root parent: {}", parent);
                 continue;
             }
 
-            // Compare the actual filename without any path components
             let entry_filename = Path::new(entry_name)
                 .file_name()
                 .unwrap_or_else(|| entry_name.as_os_str());
 
             if entry_filename == name {
-                println!("Found match for {:?}", name);
+                debug!("Found match for {:?}", name);
                 reply.entry(&TTL, &entry.attr, 0);
                 return;
             }
         }
 
-        println!("No match found for {:?}", name);
+        debug!("No match found for {:?}", name);
         reply.error(ENOENT);
     }
 

@@ -1,9 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use env_logger;
 use frogger::modules::namespace::BindMode;
 use frogger::FilesystemManager;
 use frogger::NineP;
-use std::fs;
+use log::{info, warn};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -48,6 +49,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let cli = Cli::parse();
 
     match &cli.command {
@@ -70,7 +72,7 @@ async fn main() -> Result<()> {
             let fs_mngr = FilesystemManager::new(hello_fs);
 
             fs_mngr.bind(source.as_path(), target.as_path(), bind_mode)?;
-            println!(
+            info!(
                 "Successfully bound {} to {}",
                 source.display(),
                 target.display()
@@ -85,7 +87,7 @@ async fn main() -> Result<()> {
             let fs_mngr = FilesystemManager::new(hello_fs);
 
             fs_mngr.mount(&source.as_path(), &mount_point.as_path(), &node_id)?;
-            println!(
+            info!(
                 "Successfully mounted {} to {}",
                 source.display(),
                 mount_point.display()
