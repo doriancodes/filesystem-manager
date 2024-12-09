@@ -8,7 +8,7 @@ The P9 protocol for file systems requires a unique feature called `bind`, which 
 It supports three binding modes: Before, After, and Replace. Each mode provides different behaviors for resolving file
 lookups when multiple resources are mapped to the same namespace.
 
-### Replace Binding: `bind src mountpoint`
+### Replace Binding: `frg bind src mountpoint`
 This mode replaces whatever was previously mounted at the mountpoint with the src. Only the new src is visible at the specified
 mountpoint.
 - **Behavior**: The `src` completely overrides any existing content at the `mountpoint`.
@@ -23,7 +23,7 @@ mountpoint.
     frg bind /custom/tools/bin /bin
   ```
 
-### Before binding `bind -b src mountpoint`
+### Before binding `frg bind -b src mountpoint`
 In this mode the `src` is placed *before* the existing contents of the mountpoint. When a lookup occurs,
 a Plan9 file system searches `src` first, and if the file isn't found there, it searches the original `mountpoint`.
 - **Behavior**: Adds `src` at a higher priority, leaving the existing content accessible as a fallback.
@@ -36,7 +36,7 @@ a Plan9 file system searches `src` first, and if the file isn't found there, it 
   In this case, `/custom/bin/ls` will be used instead of `/bin/ls` if both exist.
 - **Example**: Temporarily prioritizing a new set of libraries or data over the default paths for testing or debugging.
 
-### After binding `bind -a src mountpoint`
+### After binding `frg bind -a src mountpoint`
 This mode appends the `src` to the `mountpoint`'s search path. Plan 9 resolves lookups by searching the original
 `mountpoint` first, and if the file isn't found there, it checks the `src`.
 - **Behavior**: Adds `src` as a fallback while maintaining the existing content's priority.
@@ -53,7 +53,7 @@ This mode appends the `src` to the `mountpoint`'s search path. Plan 9 resolves l
   This ensures `/etc` retains its default behavior but gains the additional configuration files if the defaults don’t exist.
 
 ### Union directories
-Using `bind -b` and `bind -a`, you can create union directories where files from multiple sources appear merged.
+Using `frg bind -b` and `frg bind -a`, you can create union directories where files from multiple sources appear merged.
 For example:
 ```shell
 frg bind -b /local/bin /bin
