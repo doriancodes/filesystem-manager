@@ -1,0 +1,11 @@
+[book]
+authors = ["doriancodes"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Frogger Documentation"
+description = "🐸 Simple file system implementation using the 9P protocol"
+
+[output.html]
+git-repository-url = "https://github.com/doriancodes/frogger"
+git-repository-icon = "fa-github"
