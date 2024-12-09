@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 
 use filesystem_manager::modules::namespace::BindMode;
 use filesystem_manager::FilesystemManager;
-use filesystem_manager::HelloFS;
+use filesystem_manager::NineP;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Create HelloFS with /tmp as root
-    let hello_fs = HelloFS::new(PathBuf::from("/tmp"))?;
+    let hello_fs = NineP::new(PathBuf::from("/tmp"))?;
     let fs_mngr = FilesystemManager::new(hello_fs);
 
     // Create necessary directories

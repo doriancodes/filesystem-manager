@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use super::constants::*;
-use super::filesystem::BoundEntry;
+use super::proto::BoundEntry;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BindMode {

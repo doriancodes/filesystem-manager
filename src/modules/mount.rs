@@ -1,5 +1,6 @@
 use super::constants::BLOCK_SIZE;
-use super::filesystem::{BoundEntry, HelloFS};
+use super::proto::{BoundEntry, NineP};
+
 use super::namespace::{BindMode, NamespaceEntry};
 use anyhow::{anyhow, Result};
 use fuser::{FileAttr, FileType};
@@ -22,11 +23,11 @@ extern "C" {
 }
 
 pub struct FilesystemManager {
-    pub fs: HelloFS,
+    pub fs: NineP,
 }
 
 impl FilesystemManager {
-    pub fn new(fs: HelloFS) -> Self {
+    pub fn new(fs: NineP) -> Self {
         Self { fs }
     }
 
@@ -211,7 +212,7 @@ mod tests {
 
     fn setup_test_manager() -> (TempDir, FilesystemManager) {
         let temp_dir = tempfile::tempdir().unwrap();
-        let fs = HelloFS::new(temp_dir.path().to_path_buf()).unwrap();
+        let fs = NineP::new(temp_dir.path().to_path_buf()).unwrap();
         let manager = FilesystemManager::new(fs);
         (temp_dir, manager)
     }
