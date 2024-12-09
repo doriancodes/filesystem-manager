@@ -70,15 +70,52 @@ pub struct Qid {
     pub file_type: u8,
 }
 
+/// A 9P filesystem implementation.
+///
+/// The `NineP` struct provides a full implementation of the 9P protocol,
+/// allowing you to create a virtual filesystem that can be mounted and
+/// accessed by clients.
+///
+/// # Example
+///
+/// ```rust
+/// use filesystem_manager::NineP;
+/// use anyhow::Result;
+/// use std::path::PathBuf;
+///
+/// fn main() -> Result<()> {
+///     // Create a new NineP filesystem with "/tmp/test" as the root directory
+///     let hello_fs = NineP::new(PathBuf::from("/tmp/test"))?;
+///
+///     // Perform various filesystem operations using the NineP instance
+///     hello_fs.version("9P2000", 8192)?;
+///     let qid = hello_fs.attach(0, None, "user", "default")?;
+///     let qids = hello_fs.walk(0, 1, &["dir1", "file.txt"])?;
+///
+///     Ok(())
+/// }
+/// ```
+///
 #[derive(Debug, Clone)]
 pub struct NineP {
+    /// The namespace manager for the NineP filesystem.
     pub namespace_manager: NamespaceManager,
-    fids: Arc<Mutex<HashMap<u32, PathBuf>>>, // Map fid to path
-    msize: u32,                              // Maximum message size
-    version: String,                         // Protocol version
+    /// A mapping of file IDs (fids) to their corresponding file paths.
+    fids: Arc<Mutex<HashMap<u32, PathBuf>>>,
+    /// The maximum message size for the 9P protocol.
+    msize: u32,
+    /// The version of the 9P protocol.
+    version: String,
 }
 
 impl NineP {
+    /// Creates a new NineP filesystem with the specified root directory.
+    ///
+    /// # Arguments
+    /// * `path` - The root directory for the NineP filesystem.
+    ///
+    /// # Returns
+    /// A new `NineP` instance.
     pub fn new(path: PathBuf) -> Result<Self> {
         Ok(Self {
             namespace_manager: NamespaceManager::new(path)?,
@@ -100,7 +137,14 @@ impl NineP {
         }
     }
 
-    // Version negotiation
+    /// Negotiates the version and maximum message size for the 9P protocol.
+    ///
+    /// # Arguments
+    /// * `requested_version` - The requested version of the 9P protocol.
+    /// * `msize` - The requested maximum message size.
+    ///
+    /// # Returns
+    /// A tuple containing the negotiated maximum message size and version.
     pub fn version(&mut self, requested_version: &str, msize: u32) -> Result<(u32, String)> {
         self.msize = std::cmp::min(msize, 8192); // Cap at 8K
         let version = if requested_version == "9P2000" {
@@ -112,13 +156,30 @@ impl NineP {
         Ok((self.msize, version))
     }
 
-    // Authentication
+    /// Authenticates a user with the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `uname` - The username.
+    /// * `aname` - The authentication name.
+    /// * `afid` - The authentication file ID.
+    ///
+    /// # Returns
+    /// The Qid (unique identifier) of the authenticated user.
     pub fn auth(&mut self, uname: &str, aname: &str, afid: u32) -> Result<Qid> {
         // For this implementation, we'll return an error as we're not implementing auth
         Err(anyhow!("Authentication not required"))
     }
 
-    // Attach to the filesystem
+    /// Attaches a file ID (fid) to the root directory of the NineP filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID to attach.
+    /// * `afid` - The authentication file ID (optional).
+    /// * `uname` - The username.
+    /// * `aname` - The authentication name.
+    ///
+    /// # Returns
+    /// The Qid (unique identifier) of the root directory.
     pub fn attach(&mut self, fid: u32, afid: Option<u32>, uname: &str, aname: &str) -> Result<Qid> {
         let mut fids = self.fids.lock().unwrap();
         fids.insert(fid, PathBuf::from("/"));
@@ -130,7 +191,15 @@ impl NineP {
         })
     }
 
-    // Walk the file tree
+    /// Walks the file tree, resolving the specified file names.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID to start the walk from.
+    /// * `newfid` - The new file ID to associate with the final path.
+    /// * `wnames` - The file names to walk through.
+    ///
+    /// # Returns
+    /// A vector of Qids (unique identifiers) for the resolved file names.
     pub fn walk(&mut self, fid: u32, newfid: u32, wnames: &[String]) -> Result<Vec<Qid>> {
         let mut qids = Vec::new();
         let fids = self.fids.lock().unwrap();
@@ -171,7 +240,14 @@ impl NineP {
         Ok(qids)
     }
 
-    // Open a file
+    /// Opens a file in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the file to open.
+    /// * `flags` - The file access flags.
+    ///
+    /// # Returns
+    /// A tuple containing the Qid (unique identifier) of the opened file and the maximum message size.
     pub fn open(&mut self, fid: u32, flags: OpenFlags) -> Result<(Qid, u32)> {
         let fids = self.fids.lock().unwrap();
         let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
@@ -189,7 +265,16 @@ impl NineP {
         Err(anyhow!("File not found"))
     }
 
-    // Create a new file
+    /// Creates a new file in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the parent directory.
+    /// * `name` - The name of the new file.
+    /// * `perm` - The permissions for the new file.
+    /// * `mode` - The file access mode.
+    ///
+    /// # Returns
+    /// A tuple containing the Qid (unique identifier) of the new file and the maximum message size.
     pub fn create(
         &mut self,
         fid: u32,
@@ -244,7 +329,15 @@ impl NineP {
         ))
     }
 
-    // Read from a file
+    /// Reads data from a file in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the file to read from.
+    /// * `offset` - The offset within the file to start reading from.
+    /// * `count` - The number of bytes to read.
+    ///
+    /// # Returns
+    /// The data read from the file.
     pub fn read(&self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
         let fids = self.fids.lock().unwrap();
         let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
@@ -262,7 +355,15 @@ impl NineP {
         Err(anyhow!("File not found"))
     }
 
-    // Write to a file
+    /// Writes data to a file in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the file to write to.
+    /// * `offset` - The offset within the file to start writing at.
+    /// * `data` - The data to write to the file.
+    ///
+    /// # Returns
+    /// The number of bytes written to the file.
     pub fn write(&mut self, fid: u32, offset: u64, data: &[u8]) -> Result<u32> {
         let fids = self.fids.lock().unwrap();
         let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
@@ -286,7 +387,13 @@ impl NineP {
         Err(anyhow!("File not found"))
     }
 
-    // Close a file
+    /// Closes a file in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the file to close.
+    ///
+    /// # Returns
+    /// An empty result indicating the success of the operation.
     pub fn clunk(&mut self, fid: u32) -> Result<()> {
         let mut fids = self.fids.lock().unwrap();
         if fids.remove(&fid).is_some() {
@@ -296,7 +403,13 @@ impl NineP {
         }
     }
 
-    // Remove a file
+    /// Removes a file from the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the file to remove.
+    ///
+    /// # Returns
+    /// An empty result indicating the success of the operation.
     pub fn remove(&mut self, fid: u32) -> Result<()> {
         let mut fids = self.fids.lock().unwrap();
         let path = fids.remove(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
@@ -320,7 +433,13 @@ impl NineP {
         }
     }
 
-    // Get file/directory attributes
+    /// Retrieves the attributes of a file or directory in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the file or directory to retrieve attributes for.
+    ///
+    /// # Returns
+    /// The file or directory attributes as a `Stat` struct.
     pub fn stat(&self, fid: u32) -> Result<Stat> {
         let fids = self.fids.lock().unwrap();
         let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
@@ -359,7 +478,14 @@ impl NineP {
         Err(anyhow!("File not found"))
     }
 
-    // Modify file/directory attributes
+    /// Modifies the attributes of a file or directory in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `fid` - The file ID of the file or directory to modify.
+    /// * `stat` - The new attributes to apply.
+    ///
+    /// # Returns
+    /// An empty result indicating the success of the operation.
     pub fn wstat(&mut self, fid: u32, stat: &Stat) -> Result<()> {
         let fids = self.fids.lock().unwrap();
         let path = fids.get(&fid).ok_or_else(|| anyhow!("Invalid fid"))?;
@@ -377,7 +503,13 @@ impl NineP {
         Err(anyhow!("File not found"))
     }
 
-    // Flush a pending operation
+    /// Flushes a pending operation in the 9P filesystem.
+    ///
+    /// # Arguments
+    /// * `oldtag` - The tag of the operation to flush.
+    ///
+    /// # Returns
+    /// An empty result indicating the success of the operation.
     pub fn flush(&mut self, oldtag: u16) -> Result<()> {
         // In this implementation, we don't queue operations, so flush is a no-op
         Ok(())
