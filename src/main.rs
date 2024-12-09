@@ -4,8 +4,8 @@ use env_logger;
 use frogger::modules::namespace::BindMode;
 use frogger::FilesystemManager;
 use frogger::NineP;
-use log::{info, warn};
-use std::path::{Path, PathBuf};
+use log::info;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

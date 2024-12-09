@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::UNIX_EPOCH;
-use log::{debug, error, info, trace};
+use log::{debug, info};
 
 #[cfg(target_os = "macos")]
 extern "C" {

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
-use log::{debug, error, info, trace};
+use log::{debug, trace};
 
 // 9P protocol constants
 const QTDIR: u8 = 0x80;
