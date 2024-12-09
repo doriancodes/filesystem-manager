@@ -1,6 +1,6 @@
-# File system
+# Frogger 🐸
 
-Simple file system implemented using the 9P protocol
+Simple file system implementation using the 9P protocol
 
 ## Bind
 The P9 protocol for file systems requires a unique feature called `bind`, which allows for flexible control over the namespace

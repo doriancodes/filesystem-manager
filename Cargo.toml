@@ -1,5 +1,6 @@
 [package]
-name = "filesystem-manager"
+name = "frogger"
+description = "🐸 Simple file system implementation using the 9P protocol"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,6 +10,7 @@ fuser = "0.15.1"
 libc = "0.2"
 signal-hook = "0.3"
 tokio = { version = "1", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.2"

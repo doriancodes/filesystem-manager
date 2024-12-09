@@ -1,44 +1,97 @@
 use anyhow::Result;
-use filesystem_manager::modules::namespace::BindMode;
-use filesystem_manager::FilesystemManager;
-use filesystem_manager::NineP;
+use clap::{Parser, Subcommand};
+use frogger::modules::namespace::BindMode;
+use frogger::FilesystemManager;
+use frogger::NineP;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Bind a source directory to a target directory
+    Bind {
+        /// Bind before (default if no mode specified)
+        #[arg(short = 'b', long = "before", group = "bind_mode")]
+        before: bool,
+        /// Bind after
+        #[arg(short = 'a', long = "after", group = "bind_mode")]
+        after: bool,
+        /// Replace existing binding
+        #[arg(short = 'r', long = "replace", group = "bind_mode")]
+        replace: bool,
+        /// Create new binding
+        #[arg(short = 'c', long = "create", group = "bind_mode")]
+        create: bool,
+        /// Source directory path
+        source: PathBuf,
+        /// Target directory path
+        target: PathBuf,
+    },
+    /// Mount a directory to a mount point
+    Mount {
+        /// Directory to mount
+        source: PathBuf,
+        /// Mount point
+        mount_point: PathBuf,
+        /// Node ID (optional, defaults to localhost)
+        #[arg(default_value = "localhost")]
+        node_id: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Create necessary directories first
-    let mount_point = Path::new("/tmp/mnt/ninep");
-    fs::create_dir_all(mount_point)?;
-    fs::create_dir_all("/tmp/test")?;
-    fs::create_dir_all("/tmp/test2")?;
+    let cli = Cli::parse();
 
-    // Add some test files
-    fs::write("/tmp/test2/file1.txt", "test1")?;
-    fs::write("/tmp/test2/file2.txt", "test2")?;
-    println!("Created test files");
-    println!("Contents of /tmp/test2:");
-    for entry in fs::read_dir("/tmp/test2")? {
-        let entry = entry?;
-        println!("{:?}", entry.path());
+    match &cli.command {
+        Commands::Bind {
+            before,
+            after,
+            replace,
+            create,
+            source,
+            target,
+        } => {
+            let bind_mode = match (before, after, replace, create) {
+                (_, _, true, _) => BindMode::Replace,
+                (_, _, _, true) => BindMode::Create,
+                (_, true, _, _) => BindMode::After,
+                _ => BindMode::Before,
+            };
+
+            let hello_fs = NineP::new(target.clone())?;
+            let fs_mngr = FilesystemManager::new(hello_fs);
+
+            fs_mngr.bind(source.as_path(), target.as_path(), bind_mode)?;
+            println!(
+                "Successfully bound {} to {}",
+                source.display(),
+                target.display()
+            );
+        }
+        Commands::Mount {
+            source,
+            mount_point,
+            node_id,
+        } => {
+            let hello_fs = NineP::new(source.clone())?;
+            let fs_mngr = FilesystemManager::new(hello_fs);
+
+            fs_mngr.mount(&source.as_path(), &mount_point.as_path(), &node_id)?;
+            println!(
+                "Successfully mounted {} to {}",
+                source.display(),
+                mount_point.display()
+            );
+        }
     }
 
-    // Create NineP filesystem with /tmp/test as root
-    let hello_fs = NineP::new(PathBuf::from("/tmp/test"))?;
-    let fs_mngr = FilesystemManager::new(hello_fs);
-
-    println!("About to bind directories");
-    // Perform bind operation - swap source and target
-    fs_mngr.bind(
-        Path::new("/tmp/test2"), // This should be source
-        Path::new("/tmp/test"),  // This should be target
-        BindMode::Before,
-    )?;
-
-    println!("Directory bound, about to mount");
-    // Mount the NineP filesystem to /tmp/mnt/ninep
-    fs_mngr.mount(Path::new("/tmp/test"), mount_point, "remote_node_123")?;
-
-    println!("Mount complete");
     Ok(())
 }
