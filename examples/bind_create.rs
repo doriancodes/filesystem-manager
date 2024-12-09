@@ -1,11 +1,9 @@
 mod common;
 
 use anyhow::Result;
-use common::setup_directories;
 use filesystem_manager::modules::namespace::BindMode;
 use filesystem_manager::FilesystemManager;
 use filesystem_manager::NineP;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 #[tokio::main]

@@ -185,41 +185,82 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_bind_modes() -> Result<()> {
+        let temp_dir = setup_test_dir();
+        let manager = NamespaceManager::new(temp_dir.path().to_path_buf())?;
+
+        let source = temp_dir.path().join("source");
+        let target = temp_dir.path().join("target");
+        fs::create_dir_all(&source)?;
+        fs::create_dir_all(&target)?;
+
+        for mode in [
+            BindMode::Replace,
+            BindMode::Before,
+            BindMode::After,
+            BindMode::Create,
+        ] {
+            let mut namespace = manager.namespace.write().unwrap();
+            namespace.clear();
+            namespace.insert(
+                target.clone(),
+                vec![NamespaceEntry {
+                    source: source.clone(),
+                    target: target.clone(),
+                    bind_mode: mode.clone(),
+                    remote_node: None,
+                }],
+            );
+
+            let resolved = manager.resolve_path(&target)?;
+            match mode {
+                BindMode::Replace => assert_eq!(resolved, source),
+                _ => assert!(resolved.starts_with(&source)),
+            }
+        }
+
+        Ok(())
+    }
+
     // #[test]
-    // fn test_bind_modes() -> Result<()> {
+    // fn test_multiple_bindings() -> Result<()> {
     //     let temp_dir = setup_test_dir();
     //     let manager = NamespaceManager::new(temp_dir.path().to_path_buf())?;
 
-    //     let source = temp_dir.path().join("source");
+    //     let source1 = temp_dir.path().join("source1");
+    //     let source2 = temp_dir.path().join("source2");
     //     let target = temp_dir.path().join("target");
-    //     fs::create_dir_all(&source)?;
+
+    //     fs::create_dir_all(&source1)?;
+    //     fs::create_dir_all(&source2)?;
     //     fs::create_dir_all(&target)?;
 
-    //     for mode in [
-    //         BindMode::Replace,
-    //         BindMode::Before,
-    //         BindMode::After,
-    //         BindMode::Create,
-    //     ] {
+    //     {
     //         let mut namespace = manager.namespace.write().unwrap();
-    //         namespace.clear();
     //         namespace.insert(
     //             target.clone(),
-    //             vec![NamespaceEntry {
-    //                 source: source.clone(),
-    //                 target: target.clone(),
-    //                 bind_mode: mode.clone(),
-    //                 remote_node: None,
-    //             }],
+    //             vec![
+    //                 NamespaceEntry {
+    //                     source: source1.clone(),
+    //                     target: target.clone(),
+    //                     bind_mode: BindMode::Before,
+    //                     remote_node: None,
+    //                 },
+    //                 NamespaceEntry {
+    //                     source: source2.clone(),
+    //                     target: target.clone(),
+    //                     bind_mode: BindMode::After,
+    //                     remote_node: None,
+    //                 },
+    //             ],
     //         );
-
-    //         let resolved = manager.resolve_path(&target)?;
-    //         match mode {
-    //             BindMode::Replace => assert_eq!(resolved, source),
-    //             _ => assert!(resolved.starts_with(&source)),
-    //         }
     //     }
+
+    //     let entries = manager.list_namespace();
+    //     assert_eq!(entries.len(), 2);
 
     //     Ok(())
     // }
+  
 }

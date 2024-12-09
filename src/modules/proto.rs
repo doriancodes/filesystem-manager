@@ -6,9 +6,7 @@ use fuser::{
 };
 use libc::ENOENT;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -555,56 +553,6 @@ impl Filesystem for NineP {
         println!("No match found for {:?}", name);
         reply.error(ENOENT);
     }
-
-    // fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-    //     println!("Lookup for parent: {}, name: {:?}", parent, name);
-
-    //     let bindings = self.namespace_manager.bindings.lock().unwrap();
-    //     println!(
-    //         "Current bindings: {:?}",
-    //         bindings.keys().collect::<Vec<_>>()
-    //     );
-
-    //     // For each binding
-    //     for (inode, (entry_name, entry)) in bindings.iter() {
-    //         println!("Checking entry: {:?} against name: {:?}", entry_name, name);
-    //         if parent != 1 {
-    //             continue; // Only allow lookups in the root directory for now
-    //         }
-    //         // Compare just the final component of the path
-    //         if entry_name == name {
-    //             println!("Found match for {:?}", name);
-    //             reply.entry(&TTL, &entry.attr, 0);
-    //             return;
-    //         }
-    //     }
-
-    //     println!("No match found for {:?}", name);
-    //     reply.error(ENOENT);
-    // }
-    // fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-    //     println!("Lookup for parent: {}, name: {:?}", parent, name); // DEBUG
-    //     let bindings = self.namespace_manager.bindings.lock().unwrap();
-
-    //     println!("Current bindings: {:?}", bindings.keys());
-
-    //     for (_inode, (entry_name, entry)) in bindings.iter() {
-    //         println!("Checking entry: {:?}", entry_name);
-
-    //         if parent != 1 {
-    //             continue; // Only allow lookups in the root directory for now
-    //         }
-    //         if entry_name.as_os_str() == name {
-    //             println!("Found match for {:?}", name);
-
-    //             reply.entry(&TTL, &entry.attr, 0);
-    //             return;
-    //         }
-    //     }
-
-    //     println!("No match found for {:?}", name);
-    //     reply.error(ENOENT);
-    // }
 
     fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         let bindings = self.namespace_manager.bindings.lock().unwrap();
