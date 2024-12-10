@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::UNIX_EPOCH;
-use log::{debug, error, info, trace};
+use log::{info, debug};
 
 #[cfg(target_os = "macos")]
 extern "C" {
@@ -145,21 +145,8 @@ impl FilesystemManager {
     }
 
     /// Binds a directory to a target location.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `dir_path` - The path to bind
-    /// * `source_path` - The source directory path
-    /// * `mode` - The binding mode to use
-    /// 
-    /// # Returns
-    /// 
-    /// A Result indicating success or failure
-    pub fn bind_directory(&self, dir_path: &str, source_path: &Path, mode: BindMode) -> Result<()> {
-        println!(
-            "Binding directory: {} from source: {:?}",
-            dir_path, source_path
-        );
+    fn bind_directory(&self, dir_path: &str, source_path: &Path, mode: BindMode) -> Result<()> {
+        debug!("Binding directory: {} from source: {:?}", dir_path, source_path);
 
         let mut bindings = self.fs.namespace_manager.bindings.lock().unwrap();
         let mut next_inode = self.fs.namespace_manager.next_inode.lock().unwrap();
@@ -276,6 +263,51 @@ impl FilesystemManager {
                 inode, name, entry.attr.kind
             );
         }
+        Ok(())
+    }
+
+    /// Binds a source path to a target path with the specified mode.
+    /// 
+    /// This method creates a binding between two filesystem paths, allowing the contents
+    /// of the source path to be accessed through the target path. The behavior of the
+    /// binding is determined by the specified `BindMode`.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `source` - The source path to bind from
+    /// * `target` - The target path to bind to
+    /// * `mode` - The binding mode to use:
+    ///   - `Replace`: Replaces any existing content at the target
+    ///   - `Before`: Adds content with higher priority than existing bindings
+    ///   - `After`: Adds content with lower priority than existing bindings
+    ///   - `Create`: Creates a new binding, failing if the target exists
+    /// 
+    /// # Returns
+    /// 
+    /// * `Ok(())` if the binding was successful
+    /// * `Err(...)` if the binding failed (e.g., invalid paths, permission issues)
+    pub fn bind(&self, source: &Path, target: &Path, mode: BindMode) -> Result<()> {
+        info!("Binding {:?} to {:?} with mode {:?}", source, target, mode);
+        let abs_source = fs::canonicalize(source)?;
+        let abs_target = fs::canonicalize(target)?;
+        if !abs_source.exists() {
+            return Err(anyhow!("Source path does not exist: {:?}", abs_source));
+        }
+        if !abs_target.exists() {
+            return Err(anyhow!("Target path does not exist: {:?}", abs_target));
+        }
+        let entry = NamespaceEntry {
+            source: abs_source.clone(),
+            target: abs_target.clone(),
+            bind_mode: mode.clone(),
+            remote_node: None,
+        };
+        let mut namespace = self.fs.namespace_manager.namespace.write().unwrap();
+        namespace
+            .entry(abs_target.clone())
+            .or_insert_with(Vec::new)
+            .push(entry);
+        self.bind_directory(abs_target.to_str().unwrap(), &abs_source, mode)?;
         Ok(())
     }
 
