@@ -1,3 +1,8 @@
+//! 9P protocol implementation and filesystem operations.
+//! 
+//! This module provides the core 9P protocol implementation through the `NineP` type,
+//! along with associated types and constants for filesystem operations.
+
 use super::constants::*;
 use super::namespace::NamespaceManager;
 use anyhow::{anyhow, Result};
@@ -11,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
-use log::{debug, trace};
+use log::{debug, error, info, trace};
 
 // 9P protocol constants
 const QTDIR: u8 = 0x80;
@@ -19,53 +24,82 @@ const QTAPPEND: u8 = 0x40;
 const QTEXCL: u8 = 0x20;
 const QTAUTH: u8 = 0x08;
 
-// File access modes
+/// Represents file open flags for the 9P protocol.
 #[derive(Debug, Clone, Copy)]
 pub struct OpenFlags(pub u32);
 
 impl OpenFlags {
+    /// Read-only access
     pub const O_RDONLY: u32 = 0x00;
+    /// Write-only access
     pub const O_WRONLY: u32 = 0x01;
+    /// Read-write access
     pub const O_RDWR: u32 = 0x02;
+    /// Execute access
     pub const O_EXEC: u32 = 0x03;
+    /// Truncate file
     pub const O_TRUNC: u32 = 0x10;
 }
 
-// Helper struct for file stats
+/// File status information in the 9P protocol.
 #[derive(Debug, Clone)]
 pub struct Stat {
-    pub size: u16,    // Total size of stat message
-    pub typ: u16,     // For kernel use
-    pub dev: u32,     // For kernel use
-    pub qid: Qid,     // Unique id from server
-    pub mode: u32,    // Permissions and flags
-    pub atime: u32,   // Last access time
-    pub mtime: u32,   // Last modification time
-    pub length: u64,  // Length of file in bytes
-    pub name: String, // File name
-    pub uid: String,  // Owner name
-    pub gid: String,  // Group name
-    pub muid: String, // Name of last modifier
+    /// Total size of the stat message in bytes
+    pub size: u16,
+    /// Type of the file (for kernel use)
+    pub typ: u16,
+    /// Device ID (for kernel use)
+    pub dev: u32,
+    /// Unique identifier from the server
+    pub qid: Qid,
+    /// File permissions and flags
+    pub mode: u32,
+    /// Last access time (seconds since epoch)
+    pub atime: u32,
+    /// Last modification time (seconds since epoch)
+    pub mtime: u32,
+    /// Length of file in bytes
+    pub length: u64,
+    /// Name of the file
+    pub name: String,
+    /// Username of the file owner
+    pub uid: String,
+    /// Group name of the file
+    pub gid: String,
+    /// Username of the last modifier
+    pub muid: String,
 }
 
+/// Represents a bound filesystem entry.
 #[derive(Debug, Clone)]
 pub struct BoundEntry {
+    /// File attributes
     pub attr: FileAttr,
+    /// Optional file content
     pub content: Option<Vec<u8>>,
 }
 
+/// File open modes.
 #[derive(Debug, Clone, Copy)]
 pub enum OpenMode {
+    /// Read-only access
     Read = 0,
+    /// Write-only access
     Write = 1,
+    /// Read-write access
     ReadWrite = 2,
+    /// Execute access
     Execute = 3,
 }
 
+/// Unique file identifier in the 9P protocol.
 #[derive(Debug, Clone)]
 pub struct Qid {
+    /// Version number for cache validation
     pub version: u32,
+    /// Unique path identifier
     pub path: u64,
+    /// File type information
     pub file_type: u8,
 }
 
@@ -517,42 +551,41 @@ impl NineP {
 
 impl Filesystem for NineP {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        debug!("Lookup for parent: {}, name: {:?}", parent, name);
+        println!("Lookup for parent: {}, name: {:?}", parent, name);
 
         let bindings = self.namespace_manager.bindings.lock().unwrap();
-        trace!("Current bindings: {:?}", bindings.keys());
+        println!("Current bindings: {:?}", bindings.keys());
 
         for (inode, (entry_name, entry)) in bindings.iter() {
-            trace!(
+            println!(
                 "Comparing entry name: {:?} with lookup name: {:?}",
-                entry_name,
-                name
+                entry_name, name
             );
 
-            trace!(
+            println!(
                 "inode: {}, name: {:?}, kind: {:?}",
-                inode,
-                entry_name,
-                entry.attr.kind
+                inode, entry_name, entry.attr.kind
             );
 
+            // Only check files in the root directory for now
             if parent != 1 {
-                debug!("Skipping non-root parent: {}", parent);
+                println!("Skipping non-root parent: {}", parent);
                 continue;
             }
 
+            // Compare the actual filename without any path components
             let entry_filename = Path::new(entry_name)
                 .file_name()
                 .unwrap_or_else(|| entry_name.as_os_str());
 
             if entry_filename == name {
-                debug!("Found match for {:?}", name);
+                println!("Found match for {:?}", name);
                 reply.entry(&TTL, &entry.attr, 0);
                 return;
             }
         }
 
-        debug!("No match found for {:?}", name);
+        println!("No match found for {:?}", name);
         reply.error(ENOENT);
     }
 

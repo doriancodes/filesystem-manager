@@ -1,15 +1,21 @@
 [package]
 name = "frogger"
 description = "🐸 Simple file system implementation using the 9P protocol"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Dorian Davì <frogger.clock688@passinbox.com>"]
 license = "BSD-3-Clause"
-repository = "https://github.com/doriancodes/frogger"
+repository = "https://github.com/yourusername/frogger"
 documentation = "https://docs.rs/frogger"
 readme = "README.md"
-keywords = ["filesystem", "9p", "fuse", "bind"]
-categories = ["filesystem", "os::unix-apis"]
+keywords = ["filesystem", "9p", "fuse", "bind", "namespace"]
+categories = ["filesystem", "os::unix-apis", "virtualization"]
 edition = "2021"
+
+# Documentation configuration
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [[bin]]
 name = "frg"

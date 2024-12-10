@@ -1,3 +1,8 @@
+//! Filesystem mounting and management functionality.
+//! 
+//! This module provides the core functionality for mounting and managing
+//! filesystem bindings through the `FilesystemManager`.
+
 use super::constants::BLOCK_SIZE;
 use super::namespace::{BindMode, NamespaceEntry};
 use super::proto::{BoundEntry, NineP};
@@ -13,10 +18,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::UNIX_EPOCH;
-use log::{debug, info};
+use log::{debug, error, info, trace};
 
 #[cfg(target_os = "macos")]
 extern "C" {
+    /// Unmounts a filesystem on macOS.
+    /// 
+    /// # Arguments
+    /// * `path` - Path to unmount
+    /// * `flags` - Unmount flags
     pub fn unmount(path: *const i8, flags: i32) -> i32;
 }
 
@@ -32,11 +42,19 @@ struct DirectoryEntry {
     metadata: fs::Metadata,
 }
 
+/// Manages filesystem mounting and binding operations.
+#[derive(Clone)]
 pub struct FilesystemManager {
+    /// The underlying 9P filesystem implementation.
     pub fs: NineP,
 }
 
 impl FilesystemManager {
+    /// Creates a new filesystem manager.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `fs` - The 9P filesystem implementation to manage
     pub fn new(fs: NineP) -> Self {
         Self { fs }
     }
@@ -74,7 +92,7 @@ impl FilesystemManager {
         next_inode: &mut u64,
         bindings: &mut HashMap<u64, (OsString, BoundEntry)>,
     ) -> Result<()> {
-        debug!("Reading directory recursively: {:?}", current_path);
+        println!("Reading directory recursively: {:?}", current_path);
         let mut queue = VecDeque::new();
         queue.push_back((current_path.to_path_buf(), parent_inode));
 
@@ -97,7 +115,7 @@ impl FilesystemManager {
                 };
 
                 let file_name = entry.file_name();
-                debug!("Adding binding for: {:?} with inode: {}", file_name, inode);
+                println!("Adding binding for: {:?} with inode: {}", file_name, inode);
 
                 let file_attr = self.create_file_attr(inode, &metadata);
                 let content = if metadata.is_file() {
@@ -126,6 +144,17 @@ impl FilesystemManager {
         Ok(())
     }
 
+    /// Binds a directory to a target location.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `dir_path` - The path to bind
+    /// * `source_path` - The source directory path
+    /// * `mode` - The binding mode to use
+    /// 
+    /// # Returns
+    /// 
+    /// A Result indicating success or failure
     pub fn bind_directory(&self, dir_path: &str, source_path: &Path, mode: BindMode) -> Result<()> {
         println!(
             "Binding directory: {} from source: {:?}",
@@ -250,50 +279,29 @@ impl FilesystemManager {
         Ok(())
     }
 
-    pub fn bind(&self, source: &Path, target: &Path, mode: BindMode) -> Result<()> {
-        info!("Binding {:?} to {:?} with mode {:?}", source, target, mode);
-
-        let abs_source = fs::canonicalize(source)?;
-        let abs_target = fs::canonicalize(target)?;
-
-        if !abs_source.exists() {
-            return Err(anyhow!("Source path does not exist: {:?}", abs_source));
-        }
-
-        if !abs_target.exists() {
-            return Err(anyhow!("Target path does not exist: {:?}", abs_target));
-        }
-
-        let entry = NamespaceEntry {
-            source: abs_source.clone(),
-            target: abs_target.clone(),
-            bind_mode: mode.clone(),
-            remote_node: None,
-        };
-
-        let mut namespace = self.fs.namespace_manager.namespace.write().unwrap();
-        namespace
-            .entry(abs_target.clone())
-            .or_insert_with(Vec::new)
-            .push(entry);
-
-        self.bind_directory(abs_target.to_str().unwrap(), &abs_source, mode)?;
-
-        Ok(())
-    }
-
-    pub fn mount(&self, remote_path: &Path, local_path: &Path, remote_node: &str) -> Result<()> {
-        let abs_local = fs::canonicalize(local_path)?;
+    /// Mounts a filesystem at the specified path.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `source` - The source path to mount
+    /// * `mount_point` - Where to mount the filesystem
+    /// * `node_id` - Optional remote node identifier
+    /// 
+    /// # Returns
+    /// 
+    /// A Result indicating success or failure
+    pub fn mount(&self, source: &Path, mount_point: &Path, node_id: &str) -> Result<()> {
+        let abs_local = fs::canonicalize(mount_point)?;
 
         if !abs_local.exists() {
             return Err(anyhow!("Local mount point does not exist"));
         }
 
         let entry = NamespaceEntry {
-            source: remote_path.to_path_buf(),
+            source: source.to_path_buf(),
             target: abs_local.clone(),
             bind_mode: BindMode::Replace,
-            remote_node: Some(remote_node.to_string()),
+            remote_node: Some(node_id.to_string()),
         };
 
         let mut namespace = self.fs.namespace_manager.namespace.write().unwrap();
@@ -303,7 +311,7 @@ impl FilesystemManager {
             .push(entry);
 
         let mount_thread = {
-            let remote_path_clone = remote_path.to_path_buf();
+            let remote_path_clone = source.to_path_buf();
             let hello_fs_clone = self.fs.clone();
             thread::spawn(move || {
                 fuser::mount2(hello_fs_clone, &remote_path_clone, &[]).unwrap();
@@ -316,7 +324,7 @@ impl FilesystemManager {
             match sig {
                 SIGINT | SIGTERM => {
                     println!("Received signal, unmounting...");
-                    Self::handle_unmount(remote_path.to_str().unwrap());
+                    Self::handle_unmount(source.to_str().unwrap());
                     break;
                 }
                 _ => {}
@@ -328,6 +336,14 @@ impl FilesystemManager {
         Ok(())
     }
 
+    /// Unmounts a filesystem at the specified path.
+    /// 
+    /// # Arguments
+    /// * `path` - The path to unmount
+    /// * `specific_source` - Optional specific source to unmount
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error
     pub fn unmount(&self, path: &Path, specific_source: Option<&Path>) -> Result<()> {
         let abs_path = fs::canonicalize(path)?;
 

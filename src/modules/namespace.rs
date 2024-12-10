@@ -9,31 +9,59 @@ use std::sync::{Arc, Mutex, RwLock};
 use super::constants::*;
 use super::proto::BoundEntry;
 
+/// Represents different modes for binding operations
 #[derive(Debug, Clone, PartialEq)]
 pub enum BindMode {
+    /// Replace existing content at the mountpoint
     Replace,
+    /// Add content with higher priority
     Before,
+    /// Add content with lower priority
     After,
+    /// Create mountpoint if needed
     Create,
 }
 
+/// Entry in the namespace representing a bind operation
 #[derive(Debug, Clone)]
 pub struct NamespaceEntry {
+    /// Source path for the bind operation
     pub source: PathBuf,
+    /// Target path where the source is bound
     pub target: PathBuf,
+    /// Mode of the bind operation
     pub bind_mode: BindMode,
+    /// Optional remote node identifier
     pub remote_node: Option<String>,
 }
 
+/// Manages the filesystem namespace and bindings
 #[derive(Debug, Clone)]
 pub struct NamespaceManager {
+    /// The namespace mapping from paths to their bind entries
     pub namespace: Arc<RwLock<HashMap<PathBuf, Vec<NamespaceEntry>>>>,
+    /// Root directory of the filesystem
     pub root: PathBuf,
+    /// Mapping of inodes to bound entries
     pub bindings: Arc<Mutex<HashMap<u64, (OsString, BoundEntry)>>>,
+    /// Next available inode number
     pub next_inode: Arc<Mutex<u64>>,
 }
 
 impl NamespaceManager {
+    /// Creates a new namespace manager with the given root directory
+    /// 
+    /// # Arguments
+    /// 
+    /// * `root` - Root directory path for the namespace
+    /// 
+    /// # Returns
+    /// 
+    /// A new `NamespaceManager` instance
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if the root directory cannot be created
     pub fn new(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(&root)?;
 
@@ -57,6 +85,13 @@ impl NamespaceManager {
         })
     }
 
+    /// Resolves a path through the namespace bindings.
+    /// 
+    /// # Arguments
+    /// * `original_path` - The path to resolve
+    /// 
+    /// # Returns
+    /// * `Result<PathBuf>` - The resolved path
     pub fn resolve_path(&self, original_path: &Path) -> Result<PathBuf> {
         let abs_path = fs::canonicalize(original_path)?;
         let namespace = self.namespace.read().unwrap();
@@ -77,6 +112,10 @@ impl NamespaceManager {
         Ok(abs_path)
     }
 
+    /// Lists all entries in the namespace.
+    /// 
+    /// # Returns
+    /// * `Vec<NamespaceEntry>` - All namespace entries
     pub fn list_namespace(&self) -> Vec<NamespaceEntry> {
         let namespace = self.namespace.read().unwrap();
         namespace
