@@ -1,8 +1,12 @@
-name: Deploy mdBook
+name: Deploy User Guide
 on:
   push:
     branches:
       - main  # or master, depending on your default branch
+
+# Add these permissions
+permissions:
+  contents: write
 
 jobs:
   deploy:
