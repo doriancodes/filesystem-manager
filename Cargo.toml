@@ -1,7 +1,7 @@
 [package]
 name = "frogger"
 description = "🐸 Simple file system implementation using the 9P protocol"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Dorian Davì <frogger.clock688@passinbox.com>"]
 license = "BSD-3-Clause"
 repository = "https://github.com/doriancodes/frogger"
