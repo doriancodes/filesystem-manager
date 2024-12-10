@@ -3,7 +3,7 @@ authors = ["doriancodes"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Frogger Documentation"
+title = "Frogger User Guide"
 description = "🐸 Simple file system implementation using the 9P protocol"
 
 [output.html]
