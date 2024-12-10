@@ -66,7 +66,7 @@ For isolating environments, such as creating chroot-like environments or managin
 
 ## User Guide
 
-The user guide is available online at [frogger.github.io/frogger](https://frogger.github.io/frogger) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). To build and serve the documentation locally:
+The user guide is available online at [doriancodes.github.io/frogger](https://doriancodes.github.io/frogger/) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). To build and serve the documentation locally:
 
 ```bash
 mdbook serve docs/
