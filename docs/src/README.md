@@ -19,4 +19,14 @@ The 9P protocol is a network protocol developed for the Plan 9 operating system,
 
 - [Getting Started](user-guide/getting-started.md)
 - [Bind Operations](user-guide/bind.md)
-- [CLI Reference](reference/cli.md) 
+- [CLI Reference](reference/cli.md)
+
+## Documentation
+
+This documentation is available online at [frogger.github.io/frogger](https://frogger.github.io/frogger) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). To build and serve the documentation locally:
+
+```bash
+mdbook serve docs/
+```
+
+This will serve the documentation at [localhost:3000](http://localhost:3000).
