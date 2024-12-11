@@ -10,7 +10,7 @@ frg bind -a src mountpoint
 
 ## Behavior
 
-Frogger resolves lookups by searching the original `mountpoint` first, and if the file isn't found there, it checks the `src`. This maintains existing content's priority while providing additional fallback options.
+froggr resolves lookups by searching the original `mountpoint` first, and if the file isn't found there, it checks the `src`. This maintains existing content's priority while providing additional fallback options.
 
 ## Examples
 

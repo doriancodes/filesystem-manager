@@ -5,7 +5,7 @@ The P9 protocol for file systems requires a unique feature called `bind`, which 
 
 ## Available Modes
 
-Frogger supports four binding modes:
+froggr supports four binding modes:
 - [Replace Mode](bind-modes/replace.md): Replace existing content
 - [Before Mode](bind-modes/before.md): Add content with higher priority
 - [After Mode](bind-modes/after.md): Add content with lower priority

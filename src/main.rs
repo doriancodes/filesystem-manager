@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use env_logger;
-use frogger::modules::namespace::BindMode;
-use frogger::FilesystemManager;
-use frogger::NineP;
+use froggr::modules::namespace::BindMode;
+use froggr::FilesystemManager;
+use froggr::NineP;
 use log::info;
 use std::path::PathBuf;
 

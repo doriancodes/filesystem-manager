@@ -1,11 +1,11 @@
 [package]
-name = "frogger"
+name = "froggr"
 description = "🐸 Simple file system implementation using the 9P protocol"
-version = "0.1.2"
-authors = ["Dorian Davì <frogger.clock688@passinbox.com>"]
+version = "0.1.0"
+authors = ["Dorian Davì <froggr.clock688@passinbox.com>"]
 license = "BSD-3-Clause"
-repository = "https://github.com/doriancodes/frogger"
-documentation = "https://docs.rs/frogger"
+repository = "https://github.com/doriancodes/froggr"
+documentation = "https://docs.rs/froggr"
 readme = "README.md"
 keywords = ["filesystem", "9p", "fuse", "bind", "namespace"]
 categories = ["filesystem", "os::unix-apis", "virtualization"]

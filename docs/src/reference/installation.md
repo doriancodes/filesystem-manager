@@ -10,8 +10,8 @@
 
 1. Clone the repository:
 ```shell
-git clone https://github.com/yourusername/frogger.git
-cd frogger
+git clone https://github.com/yourusername/froggr.git
+cd froggr
 ```
 
 2. Build and install:
@@ -26,12 +26,12 @@ This will install the `frg` binary to your cargo bin directory (usually `~/.carg
 Install directly from crates.io:
 
 ```shell
-cargo install frogger
+cargo install froggr
 ```
 
 ## Verifying Installation
 
-After installation, verify that Frogger is working correctly:
+After installation, verify that froggr is working correctly:
 
 ```shell
 frg --version

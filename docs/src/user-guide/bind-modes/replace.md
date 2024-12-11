@@ -1,6 +1,6 @@
 # Replace Mode
 
-The Replace mode is the default binding mode in Frogger. It completely replaces whatever was previously mounted at the mountpoint with the new source.
+The Replace mode is the default binding mode in froggr. It completely replaces whatever was previously mounted at the mountpoint with the new source.
 
 ## Usage
 

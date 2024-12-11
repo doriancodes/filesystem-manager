@@ -1,9 +1,9 @@
 mod common;
 
 use anyhow::Result;
-use frogger::modules::namespace::BindMode;
-use frogger::FilesystemManager;
-use frogger::NineP;
+use froggr::modules::namespace::BindMode;
+use froggr::FilesystemManager;
+use froggr::NineP;
 use std::path::{Path, PathBuf};
 
 #[tokio::main]

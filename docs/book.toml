@@ -3,9 +3,9 @@ authors = ["doriancodes"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Frogger User Guide"
+title = "froggr User Guide"
 description = "🐸 Simple file system implementation using the 9P protocol"
 
 [output.html]
-git-repository-url = "https://github.com/doriancodes/frogger"
+git-repository-url = "https://github.com/doriancodes/froggr"
 git-repository-icon = "fa-github"

@@ -10,7 +10,7 @@ frg bind -b src mountpoint
 
 ## Behavior
 
-When a lookup occurs, Frogger searches `src` first, and if the file isn't found there, it searches the original `mountpoint`. This creates a layered view where new content takes precedence over existing content.
+When a lookup occurs, froggr searches `src` first, and if the file isn't found there, it searches the original `mountpoint`. This creates a layered view where new content takes precedence over existing content.
 
 ## Examples
 

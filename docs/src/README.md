@@ -1,8 +1,8 @@
-# Frogger 🐸
+# froggr 🐸
 
 Simple file system implementation using the 9P protocol
 
-Frogger is a modern implementation of the Plan 9 filesystem protocol (9P), focusing on providing flexible namespace management through bind operations.
+froggr is a modern implementation of the Plan 9 filesystem protocol (9P), focusing on providing flexible namespace management through bind operations.
 
 ## What is 9P?
 

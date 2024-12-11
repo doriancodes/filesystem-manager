@@ -1,6 +1,6 @@
 # CLI Reference
 
-Complete reference for the Frogger command-line interface.
+Complete reference for the froggr command-line interface.
 
 ## Global Options
 

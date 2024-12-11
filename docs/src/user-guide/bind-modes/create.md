@@ -10,7 +10,7 @@ frg bind -c src mountpoint
 
 ## Behavior
 
-Before performing the bind operation, Frogger checks if the mountpoint exists. If it doesn't, the directory is created automatically. After creation (if needed), it performs a standard replace binding.
+Before performing the bind operation, froggr checks if the mountpoint exists. If it doesn't, the directory is created automatically. After creation (if needed), it performs a standard replace binding.
 
 ## Examples
 

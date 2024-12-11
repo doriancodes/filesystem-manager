@@ -1,4 +1,4 @@
-# Frogger 🐸
+# froggr 🐸
 
 Simple file system implementation using the 9P protocol
 
@@ -66,11 +66,21 @@ For isolating environments, such as creating chroot-like environments or managin
 
 ## User Guide
 
-The user guide is available online at [doriancodes.github.io/frogger](https://doriancodes.github.io/frogger/) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). To build and serve the documentation locally:
+The user guide is available online at [doriancodes.github.io/froggr](https://doriancodes.github.io/froggr/) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). To build and serve the documentation locally:
 
 ```bash
 mdbook serve docs/
 ```
 
 This will serve the documentation at [localhost:3000](http://localhost:3000).
+
+### Commands:
+- `bind`: Bind a source directory to a target directory
+- `mount`: Mount a directory to a mount point
+
+For more details, use `frg --help`
+
+## License
+
+BSD-3-Clause
 

@@ -1,9 +1,9 @@
-#![doc(html_root_url = "https://docs.rs/frogger/0.1.1")]
+#![doc(html_root_url = "https://docs.rs/froggr/0.1.1")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 #![deny(rustdoc::missing_crate_level_docs)]
 
-//! # Frogger 🐸
+//! froggr: A simple file system implementation using the 9P protocol
 //! 
 //! A simple file system implementation using the 9P protocol.
 //! 
@@ -17,7 +17,7 @@
 //! ## Quick Start
 //! 
 //! ```rust,no_run
-//! use frogger::{FilesystemManager, NineP, BindMode};
+//! use froggr::{FilesystemManager, NineP, BindMode};
 //! use std::path::PathBuf;
 //! 
 //! # fn main() -> anyhow::Result<()> {
@@ -42,10 +42,10 @@
 //! - `After`: Adds content with lower priority
 //! - `Create`: Creates mountpoint if needed
 
-/// Core filesystem modules and implementations.
 pub mod modules;
 
-// Re-export key types for easy access
 pub use modules::mount::FilesystemManager;
-pub use modules::namespace::{BindMode, NamespaceManager};
-pub use modules::proto::{BoundEntry, NineP};
+pub use modules::proto::NineP;
+
+// Re-export commonly used types
+pub use modules::namespace::BindMode;
