@@ -5,7 +5,7 @@
 # User Guide
 - [Getting Started](user-guide/getting-started.md)
 - [Design Principles](user-guide/design-principles.md)
-    - [Bind Operations](user-guide/design-principles/bind-operations.md)
+    - [Bind Operations Design](user-guide/design-principles/bind-operations.md)
 - [Bind Operations](user-guide/bind.md)
     - [Replace Mode](user-guide/bind-modes/replace.md)
     - [Before Mode](user-guide/bind-modes/before.md)
