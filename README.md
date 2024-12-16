@@ -73,6 +73,14 @@ Manage filesystem sessions
 - Usage:
   - `session <session-id>`: Show detailed information for a specific session
 
+#### unmount
+Unmount a directory
+- Options:
+  - `--force`: Force unmount
+  - `--verbose`: Enable verbose output
+- Usage:
+  - `unmount <mount-point>`: Unmount a directory
+
 ### Examples:
 
 ```bash
@@ -96,7 +104,54 @@ frg session --kill abc123                   # Kill session abc123
 frg session -p                              # Kill all active sessions
 frg session --purge                         # Kill all active sessions
 frg session abc123                          # Show details for session abc123
+
+# Unmount Command Examples
+
+Unmount a filesystem:
+```bash
+# Basic unmount
+frg unmount /tmp/mnt/ninep
+
+# Force unmount (useful when filesystem is busy)
+frg unmount --force /tmp/mnt/ninep
+
+# Verbose output
+frg unmount --verbose /tmp/mnt/ninep
+
+# Combine options
+frg unmount --force --verbose /tmp/mnt/ninep
 ```
+
+Common scenarios:
+
+1. Simple unmount:
+```bash
+# Mount a filesystem
+frg mount /source/dir /mnt/point
+# Later, unmount it
+frg unmount /mnt/point
+```
+
+2. Force unmount when filesystem is busy:
+```bash
+# If normal unmount fails
+frg unmount /mnt/point
+# Error: device is busy
+
+# Use force option
+frg unmount --force /mnt/point
+```
+
+3. Verbose output for troubleshooting:
+```bash
+frg unmount --verbose /mnt/point
+# Output includes:
+# - Session ID
+# - Mount point details
+# - Operation status
+```
+
+Note: The unmount command requires appropriate permissions. You may need to use sudo for system directories.
 
 For detailed help on any command, use:
 ```bash

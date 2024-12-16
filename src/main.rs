@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use froggr::modules::namespace::BindMode;
 use froggr::modules::session::SessionManager;
@@ -63,6 +63,20 @@ enum Commands {
         /// Session ID (required for kill and show operations)
         session_id: Option<String>,
     },
+    /// Unmount a filesystem
+    Unmount {
+        /// Path to unmount
+        #[clap(value_parser)]
+        mount_point: PathBuf,
+
+        /// Force unmount even if busy
+        #[clap(short, long)]
+        force: bool,
+
+        /// Enable verbose output
+        #[clap(short, long)]
+        verbose: bool,
+    },
 }
 
 #[tokio::main]
@@ -80,7 +94,6 @@ async fn main() -> Result<()> {
                 _ => BindMode::Before,
             };
 
-            let session_manager = SessionManager::new()?;
             let session_id = session_manager.create_session(target.clone())?;
             println!("Created new session: {}", session_id);
 
@@ -96,7 +109,6 @@ async fn main() -> Result<()> {
         }
         Commands::Mount { source, mount_point, node_id } => {
             info!("Starting mount operation");
-            let session_manager = SessionManager::new()?;
             let session_id = session_manager.create_session(mount_point.clone())?;
             println!("Created new session: {}", session_id);
 
@@ -156,6 +168,28 @@ async fn main() -> Result<()> {
                 } else {
                     println!("Session not found: {}", id);
                 }
+            }
+        }
+        Commands::Unmount { mount_point, force, verbose } => {
+            info!("Starting unmount operation for {}", mount_point.display());
+            
+            if let Some(session) = session_manager.find_session_for_mount(&mount_point)? {
+                info!("Found session {} managing mount point", session.id);
+                
+                session_manager.send_unmount_command(
+                    &session.id,
+                    mount_point.clone(),
+                    *force,
+                )?;
+                
+                println!("Unmount request sent successfully");
+                if *verbose {
+                    println!("Session ID: {}", session.id);
+                    println!("Mount point: {}", mount_point.display());
+                }
+            } else {
+                error!("No session found managing mount point: {}", mount_point.display());
+                return Err(anyhow!("Mount point not found in any active session"));
             }
         }
     }

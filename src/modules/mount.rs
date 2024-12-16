@@ -22,6 +22,7 @@ use log::{info, debug, warn};
 use std::cell::RefCell;
 use std::sync::Arc;
 use crate::session::Session;
+use log::error;
 
 #[cfg(target_os = "macos")]
 extern "C" {
@@ -347,52 +348,45 @@ impl FilesystemManager {
     pub fn mount(&self, source: &Path, target: &Path, node_id: &str) -> Result<()> {
         info!("Mounting {} to {} for node {}", source.display(), target.display(), node_id);
         
-        // Verify source exists
+        // Verify source exists and is a directory
         if !source.exists() {
             return Err(anyhow!("Source path does not exist: {}", source.display())
                 .context("Mount source verification failed"));
         }
-
-        // Verify source is a directory
         if !source.is_dir() {
             return Err(anyhow!("Source path is not a directory: {}", source.display())
                 .context("Mount source must be a directory"));
         }
 
-        // Verify target exists
+        // Verify target exists and is a directory
         if !target.exists() {
             return Err(anyhow!("Target path does not exist: {}", target.display())
                 .context("Mount target verification failed"));
         }
-
-        // Verify target is a directory
         if !target.is_dir() {
             return Err(anyhow!("Target path is not a directory: {}", target.display())
                 .context("Mount target must be a directory"));
         }
 
-        // Verify target is empty or handle existing content
+        // Warn if target is not empty
         if target.read_dir()?.next().is_some() {
             warn!("Target directory is not empty: {}", target.display());
         }
 
-        // Resolve paths to absolute paths
+        // Resolve paths
         let abs_source = fs::canonicalize(source)
             .with_context(|| format!("Failed to resolve source path: {}", source.display()))?;
         let abs_target = fs::canonicalize(target)
             .with_context(|| format!("Failed to resolve target path: {}", target.display()))?;
 
-        // Convert mount options to the correct type
-        let mount_options: Vec<&OsStr> = vec![
-            OsStr::new("-o"),
-            OsStr::new("rw"),
-            OsStr::new("-o"),
-            OsStr::new("fsname=froggr"),
-            OsStr::new("-o"),
-            OsStr::new("allow_other"),
+        // Set up mount options
+        let mount_options = vec![
+            MountOption::RW,
+            MountOption::FSName("froggr".to_string()),
+            MountOption::AllowOther,
         ];
 
-        match fuser::mount(self.fs.clone(), &abs_target, &mount_options) {
+        match fuser::mount2(self.fs.clone(), &abs_target, &mount_options) {
             Ok(_) => {
                 info!("Successfully mounted {} to {}", abs_source.display(), abs_target.display());
                 
@@ -404,18 +398,21 @@ impl FilesystemManager {
                     remote_node: Some(node_id.to_string()),
                 };
 
-                let mut namespace = self.fs.namespace_manager.namespace.write()
-                    .map_err(|_| anyhow!("Failed to acquire namespace lock"))?;
-                
-                namespace
-                    .entry(abs_target.clone())
-                    .or_insert_with(Vec::new)
-                    .push(entry);
+                if let Ok(mut namespace) = self.fs.namespace_manager.namespace.write() {
+                    namespace
+                        .entry(abs_target.clone())
+                        .or_insert_with(Vec::new)
+                        .push(entry);
+                } else {
+                    error!("Failed to acquire namespace write lock");
+                }
 
                 // Notify session of successful mount
-                if let Some(session) = self.get_session() {
-                    session.notify_mount_success(source.to_path_buf(), target.to_path_buf())
-                        .context("Failed to notify session of successful mount")?;
+                if let Some(session) = Self::get_current_session() {
+                    info!("Notifying session of successful mount");
+                    session.notify_mount_success(source.to_path_buf(), target.to_path_buf())?;
+                } else {
+                    warn!("No session found to notify of mount success");
                 }
 
                 Ok(())
@@ -428,32 +425,64 @@ impl FilesystemManager {
         }
     }
 
-    /// Unmounts a filesystem at the specified path.
+    /// Unmounts a filesystem at the specified path
     /// 
     /// # Arguments
     /// * `path` - The path to unmount
-    /// * `specific_source` - Optional specific source to unmount
+    /// * `force` - Whether to force unmount even if busy
     /// 
     /// # Returns
-    /// * `Result<()>` - Success or error
-    pub fn unmount(&self, path: &Path, specific_source: Option<&Path>) -> Result<()> {
-        let abs_path = fs::canonicalize(path)?;
+    /// * `Ok(())` if unmount was successful
+    /// * `Err` if unmount failed
+    pub fn unmount(&self, path: &Path, force: bool) -> Result<()> {
+        info!("Unmounting filesystem at {}", path.display());
 
-        let mut namespace = self.fs.namespace_manager.namespace.write().unwrap();
-
-        if let Some(entries) = namespace.get_mut(&abs_path) {
-            if let Some(specific_source) = specific_source {
-                let abs_specific_source = fs::canonicalize(specific_source)?;
-                entries.retain(|entry| entry.source.clone() != abs_specific_source);
-            } else {
-                entries.clear();
-            }
-
-            if entries.is_empty() {
-                namespace.remove(&abs_path);
-            }
+        // Verify path exists
+        if !path.exists() {
+            return Err(anyhow!("Path does not exist: {}", path.display()));
         }
 
+        // Resolve to absolute path
+        let abs_path = fs::canonicalize(path)
+            .with_context(|| format!("Failed to resolve path: {}", path.display()))?;
+
+        // Convert path to C string for system call
+        let c_path = CString::new(abs_path.to_str().unwrap())
+            .map_err(|e| anyhow!("Invalid path: {}", e))?;
+
+        // Perform platform-specific unmount
+        let result = unsafe {
+            #[cfg(target_os = "macos")]
+            {
+                unmount(c_path.as_ptr(), if force { 0x00080000 } else { 0 })
+            }
+            #[cfg(target_os = "linux")]
+            {
+                if force {
+                    libc::umount2(c_path.as_ptr(), libc::MNT_FORCE)
+                } else {
+                    umount(c_path.as_ptr())
+                }
+            }
+        };
+
+        if result != 0 {
+            let err = std::io::Error::last_os_error();
+            return Err(anyhow!("Failed to unmount {}: {}", path.display(), err));
+        }
+
+        // Update namespace
+        let mut namespace = self.fs.namespace_manager.namespace.write()
+            .map_err(|_| anyhow!("Failed to acquire namespace lock"))?;
+        
+        namespace.remove(&abs_path);
+
+        // Notify session
+        if let Some(session) = Self::get_current_session() {
+            session.notify_unmount_success(path.to_path_buf())?;
+        }
+
+        info!("Successfully unmounted {}", path.display());
         Ok(())
     }
 
