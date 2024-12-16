@@ -2,6 +2,40 @@
 
 Simple file system implementation using the 9P protocol
 
+## Installation
+
+### Prerequisites
+
+- This project only works on Unix-based systems (Linux, macOS)
+- FUSE must be installed on your system:
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install fuse
+```
+
+**macOS:**
+```bash
+brew install macfuse
+```
+Note: On macOS, you may need to allow the system extension in System Preferences > Security & Privacy after installing macFUSE.
+
+**Fedora:**
+```bash
+sudo dnf install fuse
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S fuse
+```
+
+### Using Cargo
+
+```bash
+cargo install froggr
+```
+
 ## User Guide
 
 The user guide is available online at [doriancodes.github.io/froggr](https://doriancodes.github.io/froggr/) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). To build and serve the documentation locally:
