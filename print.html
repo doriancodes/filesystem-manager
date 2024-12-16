@@ -331,11 +331,33 @@ frg bind -b -c /custom/bin /opt/tools
 frg bind -a /fallback/config /etc
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
+<h2 id="system-requirements"><a class="header" href="#system-requirements">System Requirements</a></h2>
+<ul>
+<li>Unix-based operating system (Linux, macOS)</li>
+<li>Linux kernel 4.18 or later</li>
+<li>FUSE filesystem support</li>
+</ul>
+<h2 id="installing-fuse"><a class="header" href="#installing-fuse">Installing FUSE</a></h2>
+<p>Before installing froggr, you need to install FUSE on your system:</p>
+<h3 id="ubuntudebian"><a class="header" href="#ubuntudebian">Ubuntu/Debian</a></h3>
+<pre><code class="language-bash">sudo apt-get install fuse
+</code></pre>
+<h3 id="macos"><a class="header" href="#macos">macOS</a></h3>
+<pre><code class="language-bash">brew install macfuse
+</code></pre>
+<p>Note: On macOS, you may need to allow the system extension in System Preferences &gt; Security &amp; Privacy after installing macFUSE.</p>
+<h3 id="fedora"><a class="header" href="#fedora">Fedora</a></h3>
+<pre><code class="language-bash">sudo dnf install fuse
+</code></pre>
+<h3 id="arch-linux"><a class="header" href="#arch-linux">Arch Linux</a></h3>
+<pre><code class="language-bash">sudo pacman -S fuse
+</code></pre>
 <h2 id="from-source"><a class="header" href="#from-source">From Source</a></h2>
 <h3 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h3>
 <ul>
 <li>Rust toolchain (1.70 or later)</li>
 <li>Cargo package manager</li>
+<li>FUSE installed (see above)</li>
 </ul>
 <h3 id="steps"><a class="header" href="#steps">Steps</a></h3>
 <ol>
@@ -358,11 +380,6 @@ cd froggr
 <p>After installation, verify that froggr is working correctly:</p>
 <pre><code class="language-shell">frg --version
 </code></pre>
-<h2 id="system-requirements"><a class="header" href="#system-requirements">System Requirements</a></h2>
-<ul>
-<li>Linux kernel 4.18 or later</li>
-<li>FUSE filesystem support</li>
-</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
 
                     </main>
