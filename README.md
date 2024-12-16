@@ -2,6 +2,17 @@
 
 Simple file system implementation using the 9P protocol
 
+## Design principles
+
+- **Simplicity**: Keep it simple and easy to understand.
+- **Flexibility**: Allow for easy customization and extension.
+- **Performance**: Optimize for performance and efficiency.
+- **Security**: Prioritize security and data protection.
+
+### Bind operations
+
+![bind](media/bind-process.png)
+
 ## Installation
 
 ### Prerequisites
