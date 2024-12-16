@@ -175,6 +175,82 @@
 <li><a href="reference/cli.html">CLI Reference</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="design-principles"><a class="header" href="#design-principles">Design Principles</a></h1>
+<p>Froggr is built on several key design principles that guide its development and usage:</p>
+<h2 id="1-plan-9-inspiration"><a class="header" href="#1-plan-9-inspiration">1. Plan 9 Inspiration</a></h2>
+<p>Froggr draws heavy inspiration from Plan 9's filesystem architecture, particularly its approach to namespace management. Like Plan 9, Froggr treats everything as a file and uses filesystem operations to manage system resources.</p>
+<h2 id="2-per-process-namespaces"><a class="header" href="#2-per-process-namespaces">2. Per-Process Namespaces</a></h2>
+<p>Each Froggr session maintains its own filesystem namespace, similar to Plan 9's per-process namespaces. This isolation allows for:</p>
+<ul>
+<li>Independent namespace modifications</li>
+<li>Process-specific views of the filesystem</li>
+<li>Clean separation between different applications or services</li>
+</ul>
+<h2 id="3-union-directories"><a class="header" href="#3-union-directories">3. Union Directories</a></h2>
+<p>Following Plan 9's union mount concept, Froggr allows multiple directories to be combined into a single view. This enables:</p>
+<ul>
+<li>Layered filesystem composition</li>
+<li>Dynamic content aggregation</li>
+<li>Flexible resource organization</li>
+</ul>
+<h2 id="4-bind-operations"><a class="header" href="#4-bind-operations">4. Bind Operations</a></h2>
+<p>Bind operations are fundamental to Froggr's namespace manipulation:</p>
+<ul>
+<li>Replace: Complete replacement of target content</li>
+<li>Before: Prepend content to existing view</li>
+<li>After: Append content to existing view</li>
+<li>Create: Create new bindings for non-existent paths</li>
+</ul>
+<h2 id="5-server-based-architecture"><a class="header" href="#5-server-based-architecture">5. Server-Based Architecture</a></h2>
+<p>Froggr implements a 9P filesystem server that:</p>
+<ul>
+<li>Handles client requests</li>
+<li>Manages namespace operations</li>
+<li>Provides filesystem access</li>
+<li>Maintains session state</li>
+</ul>
+<h2 id="6-state-management"><a class="header" href="#6-state-management">6. State Management</a></h2>
+<p>Each session's state is:</p>
+<ul>
+<li>Persisted in /tmp/proc/<pid></li>
+<li>Tracked independently</li>
+<li>Cleaned up automatically</li>
+<li>Recoverable after crashes</li>
+</ul>
+<h2 id="7-clean-separation-of-concerns"><a class="header" href="#7-clean-separation-of-concerns">7. Clean Separation of Concerns</a></h2>
+<p>The system is designed with clear separation between:</p>
+<ul>
+<li>Filesystem operations</li>
+<li>Namespace management</li>
+<li>Session handling</li>
+<li>State persistence</li>
+<li>Client interactions</li>
+</ul>
+<h2 id="8-explicit-over-implicit"><a class="header" href="#8-explicit-over-implicit">8. Explicit Over Implicit</a></h2>
+<p>Froggr favors explicit operations:</p>
+<ul>
+<li>Clear bind modes</li>
+<li>Visible namespace changes</li>
+<li>Traceable state modifications</li>
+<li>Documented side effects</li>
+</ul>
+<h2 id="9-fail-safe-operations"><a class="header" href="#9-fail-safe-operations">9. Fail-Safe Operations</a></h2>
+<p>Operations are designed to:</p>
+<ul>
+<li>Validate inputs</li>
+<li>Check permissions</li>
+<li>Handle errors gracefully</li>
+<li>Clean up on failure</li>
+<li>Maintain consistency</li>
+</ul>
+<h2 id="10-unix-integration"><a class="header" href="#10-unix-integration">10. Unix Integration</a></h2>
+<p>While inspired by Plan 9, Froggr integrates well with Unix systems:</p>
+<ul>
+<li>Works with existing filesystems</li>
+<li>Respects Unix permissions</li>
+<li>Uses familiar path conventions</li>
+<li>Provides Unix-like tools</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="bind-operations"><a class="header" href="#bind-operations">Bind Operations</a></h1>
 <p>The P9 protocol for file systems requires a unique feature called <code>bind</code>, which allows for flexible control over the namespace
 (file hierarchy). The bind operation maps a file, directory, or another namespace tree into a new location in the namespace.</p>
