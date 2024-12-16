@@ -14,12 +14,6 @@ pub mod mount;
 /// Namespace management and binding operations implementation.
 pub mod namespace;
 pub mod proto;
-/// Unix daemon process management implementation.
-/// 
-/// This module provides functionality for running processes in the background
-/// as Unix daemons, handling process detachment, file descriptor management,
-/// and PID file handling.
-pub mod daemon;
 /// Session management implementation.
 /// 
 /// This module provides the `Session` struct which manages filesystem sessions
