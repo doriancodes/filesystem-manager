@@ -2,11 +2,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use env_logger;
 use froggr::modules::namespace::BindMode;
+use froggr::session::Session;
 use froggr::{FilesystemManager, NineP};
-use log::{info, error, LevelFilter};
-use session::Session;
-use std::path::PathBuf;
+use log::{error, info, LevelFilter};
 use std::env;
+use std::path::PathBuf;
 use tokio::signal;
 
 #[derive(Parser)]
@@ -64,10 +64,8 @@ async fn main() -> Result<()> {
         LevelFilter::Info
     };
 
-    env_logger::Builder::new()
-        .filter_level(log_level)
-        .init();
-    
+    env_logger::Builder::new().filter_level(log_level).init();
+
     info!("Starting froggr...");
 
     match &cli.command {
@@ -88,7 +86,9 @@ async fn main() -> Result<()> {
 
             let session = Session::new(target.clone())?;
 
-            session.fs_manager.bind(source.as_path(), target.as_path(), bind_mode)?;
+            session
+                .fs_manager
+                .bind(source.as_path(), target.as_path(), bind_mode)?;
             info!(
                 "Successfully bound {} to {}",
                 source.display(),
@@ -102,7 +102,9 @@ async fn main() -> Result<()> {
         } => {
             let session = Session::new(source.clone())?;
 
-            fs_mngr.mount(&source.as_path(), &mount_point.as_path(), &node_id)?;
+            session
+                .fs_manager
+                .mount(&source.as_path(), &mount_point.as_path(), &node_id)?;
             info!(
                 "Successfully mounted {} to {}",
                 source.display(),

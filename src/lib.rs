@@ -4,27 +4,27 @@
 #![deny(rustdoc::missing_crate_level_docs)]
 
 //! froggr: A simple file system implementation using the 9P protocol
-//! 
+//!
 //! A simple file system implementation using the 9P protocol.
-//! 
+//!
 //! ## Features
-//! 
+//!
 //! - Flexible namespace management through bind operations
 //! - Multiple binding modes (Replace, Before, After, Create)
 //! - Union directories
 //! - Custom environments
-//! 
+//!
 //! ## Quick Start
-//! 
+//!
 //! ```rust,no_run
 //! use froggr::{FilesystemManager, NineP, BindMode};
 //! use std::path::PathBuf;
-//! 
+//!
 //! # fn main() -> anyhow::Result<()> {
 //! // Create a new filesystem
 //! let fs = NineP::new(PathBuf::from("/tmp/test"))?;
 //! let manager = FilesystemManager::new(fs);
-//! 
+//!
 //! // Bind a directory
 //! manager.bind(
 //!     "/source/path".as_ref(),
@@ -34,9 +34,9 @@
 //! # Ok(())
 //! # }
 //! ```
-//! 
+//!
 //! ## Bind Modes
-//! 
+//!
 //! - `Replace`: Replaces existing content at the mountpoint
 //! - `Before`: Adds content with higher priority
 //! - `After`: Adds content with lower priority
@@ -49,3 +49,5 @@ pub use modules::proto::NineP;
 
 // Re-export commonly used types
 pub use modules::namespace::BindMode;
+
+pub use modules::session;
