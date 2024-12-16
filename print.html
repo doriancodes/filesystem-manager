@@ -251,6 +251,83 @@
 <li>Uses familiar path conventions</li>
 <li>Provides Unix-like tools</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="bind-operation-design"><a class="header" href="#bind-operation-design">Bind Operation Design</a></h1>
+<p>The bind operation is one of the fundamental mechanisms in Froggr's namespace management system. It allows for dynamic modification of the filesystem view by overlaying directories and files.</p>
+<h2 id="process-overview"><a class="header" href="#process-overview">Process Overview</a></h2>
+<p><img src="user-guide/design-principles/../../media/bind-process.png" alt="Bind Operation Process" /></p>
+<p>The bind operation follows a specific process flow:</p>
+<ol>
+<li>
+<p><strong>Request Initiation</strong></p>
+<ul>
+<li>Client sends bind request with source and target paths</li>
+<li>Bind mode is specified (Replace, Before, After, Create)</li>
+</ul>
+</li>
+<li>
+<p><strong>Validation</strong></p>
+<ul>
+<li>Source path existence check</li>
+<li>Target path validation</li>
+<li>Permission verification</li>
+<li>Mode-specific requirements check</li>
+</ul>
+</li>
+<li>
+<p><strong>Namespace Update</strong></p>
+<ul>
+<li>Current namespace state is preserved</li>
+<li>New binding is created according to specified mode</li>
+<li>Namespace tree is updated</li>
+<li>Changes are atomically applied</li>
+</ul>
+</li>
+<li>
+<p><strong>State Management</strong></p>
+<ul>
+<li>Session state is updated</li>
+<li>New binding is recorded</li>
+<li>State is persisted to disk</li>
+<li>Recovery information is saved</li>
+</ul>
+</li>
+<li>
+<p><strong>Completion</strong></p>
+<ul>
+<li>Success/failure status is determined</li>
+<li>Client is notified of result</li>
+<li>Namespace becomes immediately consistent</li>
+</ul>
+</li>
+</ol>
+<h2 id="key-design-aspects"><a class="header" href="#key-design-aspects">Key Design Aspects</a></h2>
+<h3 id="atomicity"><a class="header" href="#atomicity">Atomicity</a></h3>
+<ul>
+<li>All bind operations are atomic</li>
+<li>Namespace remains consistent during updates</li>
+<li>Failures result in complete rollback</li>
+</ul>
+<h3 id="isolation"><a class="header" href="#isolation">Isolation</a></h3>
+<ul>
+<li>Each session maintains independent bindings</li>
+<li>Changes don't affect other sessions</li>
+<li>Namespace modifications are session-local</li>
+</ul>
+<h3 id="persistence"><a class="header" href="#persistence">Persistence</a></h3>
+<ul>
+<li>Bindings are recorded in session state</li>
+<li>State is saved in /tmp/proc/<pid></li>
+<li>Recovery is possible after crashes</li>
+<li>Clean session termination removes state</li>
+</ul>
+<h3 id="flexibility"><a class="header" href="#flexibility">Flexibility</a></h3>
+<ul>
+<li>Multiple bind modes supported</li>
+<li>Dynamic namespace modification</li>
+<li>Runtime configuration possible</li>
+<li>Stackable directory views</li>
+</ul>
+<p>This design ensures that bind operations are reliable, predictable, and maintainable while providing the flexibility needed for complex namespace configurations.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="bind-operations"><a class="header" href="#bind-operations">Bind Operations</a></h1>
 <p>The P9 protocol for file systems requires a unique feature called <code>bind</code>, which allows for flexible control over the namespace
 (file hierarchy). The bind operation maps a file, directory, or another namespace tree into a new location in the namespace.</p>
