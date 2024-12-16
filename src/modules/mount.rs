@@ -6,14 +6,14 @@
 use super::constants::BLOCK_SIZE;
 use super::namespace::{BindMode, NamespaceEntry};
 use super::proto::{BoundEntry, NineP};
-use anyhow::{anyhow, Result};
-use fuser::{FileAttr, FileType};
+use anyhow::{anyhow, Result, Context};
+use fuser::{FileAttr, FileType, MountOption};
 use libc::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ffi::CString;
-use std::ffi::OsString;
+use std::ffi::{OsString, OsStr};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -332,59 +332,100 @@ impl FilesystemManager {
     /// Mounts a filesystem at the specified path.
     /// 
     /// # Arguments
-    /// 
-    /// * `source` - The source path to mount
-    /// * `target` - The target path to mount
-    /// * `node_id` - Optional remote node identifier
+    /// * `source` - The source path to mount from
+    /// * `target` - The target path to mount to
+    /// * `node_id` - Node identifier for the mount
     /// 
     /// # Returns
-    /// 
-    /// A Result indicating success or failure
+    /// * `Ok(())` if the mount was successful
+    /// * `Err` with a descriptive error message if:
+    ///   - Source path doesn't exist
+    ///   - Target path doesn't exist
+    ///   - Target is not a directory
+    ///   - Mount operation fails
+    ///   - Insufficient permissions
     pub fn mount(&self, source: &Path, target: &Path, node_id: &str) -> Result<()> {
         info!("Mounting {} to {} for node {}", source.display(), target.display(), node_id);
         
-        // Resolve paths
-        let abs_source = fs::canonicalize(source)?;
-        let abs_target = fs::canonicalize(target)?;
-        info!("Resolved paths - source: {:?}, target: {:?}", abs_source, abs_target);
-
-        // Verify paths exist
-        if !abs_source.exists() {
-            return Err(anyhow!("Source path does not exist: {:?}", abs_source));
-        }
-        if !abs_target.exists() {
-            return Err(anyhow!("Target path does not exist: {:?}", abs_target));
+        // Verify source exists
+        if !source.exists() {
+            return Err(anyhow!("Source path does not exist: {}", source.display())
+                .context("Mount source verification failed"));
         }
 
-        // Create mount entry
-        let entry = NamespaceEntry {
-            source: abs_source.clone(),
-            target: abs_target.clone(),
-            bind_mode: BindMode::Before, // Default mode for mounts
-            remote_node: Some(node_id.to_string()),
-        };
-
-        // Update namespace
-        let mut namespace = self.fs.namespace_manager.namespace.write().unwrap();
-        namespace
-            .entry(abs_target.clone())
-            .or_insert_with(Vec::new)
-            .push(entry);
-
-        // Perform the mount operation
-        self.mount_directory(abs_target.to_str().unwrap(), &abs_source)?;
-
-        // Notify session of successful mount
-        info!("Mount operation successful, notifying session");
-        if let Some(session) = FilesystemManager::get_current_session() {
-            info!("Found current session, sending notification");
-            session.notify_mount_success(source.to_path_buf(), target.to_path_buf())?;
-            info!("Mount success notification sent");
-        } else {
-            warn!("No current session found for mount notification");
+        // Verify source is a directory
+        if !source.is_dir() {
+            return Err(anyhow!("Source path is not a directory: {}", source.display())
+                .context("Mount source must be a directory"));
         }
 
-        Ok(())
+        // Verify target exists
+        if !target.exists() {
+            return Err(anyhow!("Target path does not exist: {}", target.display())
+                .context("Mount target verification failed"));
+        }
+
+        // Verify target is a directory
+        if !target.is_dir() {
+            return Err(anyhow!("Target path is not a directory: {}", target.display())
+                .context("Mount target must be a directory"));
+        }
+
+        // Verify target is empty or handle existing content
+        if target.read_dir()?.next().is_some() {
+            warn!("Target directory is not empty: {}", target.display());
+        }
+
+        // Resolve paths to absolute paths
+        let abs_source = fs::canonicalize(source)
+            .with_context(|| format!("Failed to resolve source path: {}", source.display()))?;
+        let abs_target = fs::canonicalize(target)
+            .with_context(|| format!("Failed to resolve target path: {}", target.display()))?;
+
+        // Convert mount options to the correct type
+        let mount_options: Vec<&OsStr> = vec![
+            OsStr::new("-o"),
+            OsStr::new("rw"),
+            OsStr::new("-o"),
+            OsStr::new("fsname=froggr"),
+            OsStr::new("-o"),
+            OsStr::new("allow_other"),
+        ];
+
+        match fuser::mount(self.fs.clone(), &abs_target, &mount_options) {
+            Ok(_) => {
+                info!("Successfully mounted {} to {}", abs_source.display(), abs_target.display());
+                
+                // Update namespace
+                let entry = NamespaceEntry {
+                    source: abs_source.clone(),
+                    target: abs_target.clone(),
+                    bind_mode: BindMode::Before,
+                    remote_node: Some(node_id.to_string()),
+                };
+
+                let mut namespace = self.fs.namespace_manager.namespace.write()
+                    .map_err(|_| anyhow!("Failed to acquire namespace lock"))?;
+                
+                namespace
+                    .entry(abs_target.clone())
+                    .or_insert_with(Vec::new)
+                    .push(entry);
+
+                // Notify session of successful mount
+                if let Some(session) = self.get_session() {
+                    session.notify_mount_success(source.to_path_buf(), target.to_path_buf())
+                        .context("Failed to notify session of successful mount")?;
+                }
+
+                Ok(())
+            },
+            Err(e) => {
+                Err(anyhow!("Mount operation failed: {}", e)
+                    .context(format!("Failed to mount {} to {}", 
+                        abs_source.display(), abs_target.display())))
+            }
+        }
     }
 
     /// Unmounts a filesystem at the specified path.
