@@ -11,7 +11,7 @@ Simple file system implementation using the 9P protocol
 
 ### Bind operations
 
-![bind](media/bind-process.png)
+![bind](docs/src/media/bind-process.png)
 
 ## Installation
 
