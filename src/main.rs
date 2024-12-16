@@ -52,12 +52,19 @@ enum Commands {
         #[arg(default_value = "localhost")]
         node_id: String,
     },
-    /// List all active sessions
-    Sessions,
-    /// Kill a specific session
-    Kill {
-        /// Session ID to kill
-        session_id: String,
+    /// Manage filesystem sessions
+    Session {
+        /// List all active sessions
+        #[arg(short = 'l', long = "list")]
+        list: bool,
+        /// Kill a specific session
+        #[arg(short = 'k', long = "kill")]
+        kill: bool,
+        /// Kill all active sessions
+        #[arg(short = 'p', long = "purge")]
+        purge: bool,
+        /// Session ID (required for kill and show operations)
+        session_id: Option<String>,
     },
 }
 
@@ -107,21 +114,49 @@ async fn main() -> Result<()> {
             // Initialize mounting in the new session
             println!("Created new session: {}", session_id);
         }
-        Commands::Sessions => {
-            let sessions = session_manager.list_sessions()?;
-            println!("Active sessions:");
-            for session in sessions {
-                println!("ID: {}", session.id);
-                println!("  PID: {}", session.pid);
-                println!("  Root: {}", session.root.display());
-                println!("  Mounts: {:?}", session.mounts);
-                println!("  Binds: {:?}", session.binds);
-                println!();
+        Commands::Session { list, kill, purge, session_id } => {
+            match (list, kill, purge, session_id) {
+                (true, _, _, _) => {
+                    let sessions = session_manager.list_sessions()?;
+                    println!("Active sessions:");
+                    for session in sessions {
+                        println!("ID: {}", session.id);
+                        println!("  PID: {}", session.pid);
+                        println!("  Root: {}", session.root.display());
+                        println!();
+                    }
+                }
+                (_, true, _, Some(id)) => {
+                    session_manager.kill_session(id)?;
+                    println!("Session {} terminated", id);
+                }
+                (_, _, true, _) => {
+                    let killed = session_manager.purge_sessions()?;
+                    println!("Purged {} sessions", killed);
+                }
+                (_, _, _, Some(id)) => {
+                    // Show details for specific session
+                    if let Some(session) = session_manager.get_session(id)? {
+                        println!("Session Details:");
+                        println!("ID: {}", session.id);
+                        println!("PID: {}", session.pid);
+                        println!("Root: {}", session.root.display());
+                        println!("\nMounts:");
+                        for (source, target) in &session.mounts {
+                            println!("  {} -> {}", source.display(), target.display());
+                        }
+                        println!("\nBinds:");
+                        for (source, target) in &session.binds {
+                            println!("  {} -> {}", source.display(), target.display());
+                        }
+                    } else {
+                        println!("Session not found: {}", id);
+                    }
+                }
+                _ => {
+                    println!("Invalid command. Use --help for usage information.");
+                }
             }
-        }
-        Commands::Kill { session_id } => {
-            session_manager.kill_session(session_id)?;
-            println!("Session {} terminated", session_id);
         }
     }
 

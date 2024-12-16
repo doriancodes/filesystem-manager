@@ -145,6 +145,55 @@ impl SessionManager {
             Err(anyhow::anyhow!("Session not found"))
         }
     }
+
+    /// Terminates all active sessions.
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - Number of sessions terminated
+    /// * `Err` if termination of any session fails
+    pub fn purge_sessions(&self) -> Result<usize> {
+        let sessions = self.list_sessions()?;
+        let mut killed = 0;
+
+        for session in sessions {
+            match self.kill_session(&session.id) {
+                Ok(_) => killed += 1,
+                Err(e) => error!("Failed to kill session {}: {}", session.id, e),
+            }
+        }
+
+        // Clean up any orphaned session files
+        if let Ok(entries) = fs::read_dir(&self.sessions_dir) {
+            for entry in entries.flatten() {
+                if let Err(e) = fs::remove_file(entry.path()) {
+                    error!("Failed to remove session file: {}", e);
+                }
+            }
+        }
+
+        info!("Purged {} sessions", killed);
+        Ok(killed)
+    }
+
+    /// Get details for a specific session.
+    ///
+    /// # Arguments
+    /// * `session_id` - ID of the session to retrieve
+    ///
+    /// # Returns
+    /// * `Ok(Some(SessionInfo))` if the session exists
+    /// * `Ok(None)` if the session doesn't exist
+    /// * `Err` if reading session information fails
+    pub fn get_session(&self, session_id: &str) -> Result<Option<SessionInfo>> {
+        let session_file = self.sessions_dir.join(session_id);
+        if session_file.exists() {
+            let content = fs::read_to_string(&session_file)?;
+            let info: SessionInfo = serde_json::from_str(&content)?;
+            Ok(Some(info))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 /// Messages that can be sent to the session handler thread.

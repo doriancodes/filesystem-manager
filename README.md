@@ -29,14 +29,15 @@ Mount a directory to a mount point (creates a new session)
   - `--node-id <ID>`: Node identifier (defaults to "localhost")
   - `-v, --verbose`: Enable verbose logging
 
-#### sessions
-List all active sessions
-- Shows session ID, PID, root directory, and active mounts/binds
-
-#### kill
-Terminate a specific session
-- Arguments:
-  - `session-id`: The ID of the session to terminate
+#### session
+Manage filesystem sessions
+- Options:
+  - `-l, --list`: List all active sessions
+  - `-k, --kill <session-id>`: Kill a specific session
+  - `-p, --purge`: Kill all active sessions
+  - `-v, --verbose`: Enable verbose logging
+- Usage:
+  - `session <session-id>`: Show detailed information for a specific session
 
 ### Examples:
 
@@ -54,8 +55,13 @@ frg mount /source/dir /mount/point mynode     # Mount with custom node-id
 frg mount -v /source/dir /mount/point         # Mount with verbose logging
 
 # Session Management
-frg sessions                                  # List all active sessions
-frg kill <session-id>                         # Terminate a specific session
+frg session -l                              # List all active sessions
+frg session --list                          # List all active sessions
+frg session -k abc123                       # Kill session abc123
+frg session --kill abc123                   # Kill session abc123
+frg session -p                              # Kill all active sessions
+frg session --purge                         # Kill all active sessions
+frg session abc123                          # Show details for session abc123
 ```
 
 For detailed help on any command, use:
