@@ -20,6 +20,8 @@ use nix::unistd::{fork, ForkResult};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use tokio::signal::ctrl_c;
+use parking_lot::RwLock;
+use crate::BindMode;
 
 /// Information about a running filesystem session.
 #[derive(Debug, Serialize, Deserialize)]
@@ -86,19 +88,23 @@ impl SessionManager {
                 Ok(session_id)
             }
             Ok(ForkResult::Child) => {
-                // Create a new runtime in the child process
+                let runtime = tokio::runtime::Runtime::new()?;
+                let session = Session::new(root.clone(), session_id)?;
+                let session_clone = session.clone();
+
+                // Store session in thread-local storage
+                FilesystemManager::set_current_session(session.clone());
+
+                info!("Session stored in thread-local storage");
+
                 std::thread::spawn(move || {
-                    let runtime = tokio::runtime::Runtime::new().unwrap();
-                    let session = Session::new(root).unwrap();
-                    
                     runtime.block_on(async {
-                        if let Err(e) = session.run().await {
+                        if let Err(e) = session_clone.run().await {
                             error!("Session error: {}", e);
                         }
                     });
                 });
                 
-                // Keep the process alive
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
@@ -194,6 +200,40 @@ impl SessionManager {
             Ok(None)
         }
     }
+
+    /// Sends a bind command to a running session.
+    ///
+    /// # Arguments
+    /// * `session_id` - ID of the target session
+    /// * `source` - Source path to bind from
+    /// * `target` - Target path to bind to
+    /// * `mode` - Binding mode to use
+    ///
+    /// # Returns
+    /// * `Ok(())` if the command was sent successfully
+    /// * `Err` if the session doesn't exist or the command couldn't be sent
+    pub fn send_bind_command(&self, session_id: &str, source: PathBuf, target: PathBuf, mode: BindMode) -> Result<()> {
+        info!("Sending bind command to session {}", session_id);
+        if let Some(session) = self.get_session(session_id)? {
+            // Create a named pipe or socket for IPC
+            let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
+            if !pipe_path.exists() {
+                nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU)?;
+            }
+
+            // Write the bind command to the pipe
+            let command = serde_json::to_string(&SessionCommand::Bind {
+                source,
+                target,
+                mode,
+            })?;
+            fs::write(&pipe_path, command)?;
+            info!("Bind command sent through pipe");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Session not found"))
+        }
+    }
 }
 
 /// Messages that can be sent to the session handler thread.
@@ -216,6 +256,13 @@ enum SessionMessage {
         target: PathBuf,
         /// Binding mode
         mode: crate::modules::namespace::BindMode,
+    },
+    /// Bind success
+    BindSuccess {
+        /// Source path to bind from
+        source: PathBuf,
+        /// Target path to bind to
+        target: PathBuf,
     },
     /// Unmount a filesystem
     Unmount {
@@ -262,6 +309,8 @@ pub struct Session {
     message_thread: JoinHandle<()>,
     /// Flag indicating if the session is running
     is_running: Arc<AtomicBool>,
+    /// Session state
+    state: Arc<RwLock<SessionState>>,
 }
 
 impl Session {
@@ -278,28 +327,40 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if the filesystem manager cannot be initialized
-    pub fn new<P: AsRef<Path>>(root: P) -> Result<Self> {
-        let root = root.as_ref().to_path_buf();
+    pub fn new(root: PathBuf, session_id: String) -> Result<Arc<Self>> {
         let fs = crate::NineP::new(root.clone())?;
         let fs_manager = FilesystemManager::new(fs);
-
         let (tx, rx) = channel();
         let is_running = Arc::new(AtomicBool::new(true));
         let is_running_clone = is_running.clone();
         let fs_manager_clone = fs_manager.clone();
+        
+        let state = Arc::new(RwLock::new(SessionState::load(&root, session_id.clone())?));
+        let state_clone = state.clone();
 
         let message_thread = thread::spawn(move || {
-            Self::run_message_handler(rx, is_running_clone, fs_manager_clone);
+            Self::run_message_handler(rx, is_running_clone, fs_manager_clone, state_clone);
         });
 
-        info!("Session started in {}", root.display());
-
-        Ok(Self {
+        let session = Arc::new(Self {
             fs_manager,
             message_tx: tx,
             message_thread,
             is_running,
-        })
+            state,
+        });
+
+        // Set up command listener
+        let session_clone = session.clone();
+        let pipe_path = format!("/tmp/froggr/sessions/{}.pipe", session_id);
+        std::thread::spawn(move || {
+            Self::run_command_listener(session_clone, &pipe_path);
+        });
+
+        FilesystemManager::set_current_session(session.clone());
+        info!("Session started in {} with ID {}", root.display(), session_id);
+
+        Ok(session)
     }
 
     /// Runs the message handling loop.
@@ -316,42 +377,68 @@ impl Session {
         rx: Receiver<SessionMessage>,
         is_running: Arc<AtomicBool>,
         fs_manager: FilesystemManager,
+        state: Arc<RwLock<SessionState>>,
     ) {
+        info!("Message handler started");
         while is_running.load(Ordering::SeqCst) {
             match rx.recv() {
-                Ok(message) => match message {
-                    SessionMessage::Mount {
-                        source,
-                        target,
-                        node_id,
-                    } => {
-                        info!(
-                            "Processing mount request: {:?} -> {:?} (node: {})",
-                            source, target, node_id
-                        );
-                        if let Err(e) = fs_manager.mount(&source, &target, &node_id) {
-                            error!("Mount failed: {}", e);
+                Ok(message) => {
+                    info!("Received message: {:?}", message);
+                    match message {
+                        SessionMessage::Mount { source, target, node_id } => {
+                            info!("Processing mount request: {:?} -> {:?} (node: {})", 
+                                source, target, node_id);
+                            if let Err(e) = fs_manager.mount(&source, &target, &node_id) {
+                                error!("Mount failed: {}", e);
+                            } else {
+                                state.write().add_mount(source, target);
+                            }
+                        },
+                        SessionMessage::Bind { source, target, mode } => {
+                            info!("Processing bind request: {:?} -> {:?}", source, target);
+                            if let Err(e) = fs_manager.bind(&source, &target, mode) {
+                                error!("Bind failed: {}", e);
+                            }
+                        },
+                        SessionMessage::BindSuccess { source, target } => {
+                            info!("Processing BindSuccess message");
+                            {
+                                let mut state = state.write();
+                                info!("Adding bind to state: {:?} -> {:?}", source, target);
+                                state.add_bind(source.clone(), target.clone());
+                                info!("Current binds after update: {:?}", state.binds);
+                            }
+                            
+                            // Update session info file
+                            let state = state.read();
+                            let session_info = SessionInfo {
+                                id: state.id.clone(),
+                                pid: std::process::id() as i32,
+                                root: state.root.clone(),
+                                mounts: state.mounts.clone(),
+                                binds: state.binds.clone(),
+                            };
+                            
+                            info!("Updating session file");
+                            if let Ok(session_json) = serde_json::to_string(&session_info) {
+                                let session_file = format!("/tmp/froggr/sessions/{}", state.id);
+                                if let Err(e) = fs::write(&session_file, session_json) {
+                                    error!("Failed to update session info: {}", e);
+                                } else {
+                                    info!("Session info updated successfully");
+                                }
+                            }
+                        },
+                        SessionMessage::Unmount { path } => {
+                            info!("Processing unmount request: {:?}", path);
+                            if let Err(e) = fs_manager.unmount(&path, None) {
+                                error!("Unmount failed: {}", e);
+                            }
+                        },
+                        SessionMessage::Shutdown => {
+                            info!("Received shutdown message");
+                            break;
                         }
-                    }
-                    SessionMessage::Bind {
-                        source,
-                        target,
-                        mode,
-                    } => {
-                        info!("Processing bind request: {:?} -> {:?}", source, target);
-                        if let Err(e) = fs_manager.bind(&source, &target, mode) {
-                            error!("Bind failed: {}", e);
-                        }
-                    }
-                    SessionMessage::Unmount { path } => {
-                        info!("Processing unmount request: {:?}", path);
-                        if let Err(e) = fs_manager.unmount(&path, None) {
-                            error!("Unmount failed: {}", e);
-                        }
-                    }
-                    SessionMessage::Shutdown => {
-                        info!("Received shutdown message");
-                        break;
                     }
                 },
                 Err(e) => {
@@ -360,6 +447,7 @@ impl Session {
                 }
             }
         }
+        info!("Message handler terminated");
     }
 
     /// Mount a filesystem at the specified path.
@@ -435,13 +523,10 @@ impl Session {
     ///
     /// * `Ok(())` if shutdown was successful
     /// * `Err` if there was an error during shutdown
-    pub fn shutdown(mut self) -> Result<()> {
+    pub fn shutdown(&self) -> Result<()> {
         info!("Shutting down session");
         self.message_tx.send(SessionMessage::Shutdown)?;
-        let thread = std::mem::replace(&mut self.message_thread, thread::spawn(|| {}));
-        thread
-            .join()
-            .map_err(|_| anyhow::anyhow!("Failed to join message thread"))?;
+        self.is_running.store(false, Ordering::SeqCst);
         Ok(())
     }
 
@@ -450,7 +535,7 @@ impl Session {
     /// # Returns
     /// * `Ok(())` if the session shuts down cleanly
     /// * `Err` if an error occurs during session execution
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(&self) -> Result<()> {
         info!("Session running. Waiting for shutdown signal...");
         
         // Wait for shutdown signal
@@ -461,6 +546,93 @@ impl Session {
         info!("Session terminated");
         
         Ok(())
+    }
+
+    /// Get current bind
+    pub fn get_current_bind(&self) -> Option<(PathBuf, PathBuf)> {
+        // Get the current bind from the session state
+        let state = self.state.read();
+        state.binds.last().cloned()
+    }
+
+    /// Notify of successful bind
+    pub fn notify_bind_success(&self, source: PathBuf, target: PathBuf) -> Result<()> {
+        info!("Notifying bind success: {:?} -> {:?}", source, target);
+        {
+            let mut state = self.state.write();
+            state.add_bind(source.clone(), target.clone());
+            info!("State updated, current binds: {:?}", state.binds);
+        }
+        
+        // Also send through message channel for consistency
+        self.message_tx.send(SessionMessage::BindSuccess { 
+            source, 
+            target 
+        })?;
+        
+        info!("Bind success notification sent");
+        Ok(())
+    }
+
+    /// Runs a listener for commands sent through the named pipe
+    fn run_command_listener(session: Arc<Session>, pipe_path: &str) {
+        info!("Starting command listener for pipe {}", pipe_path);
+        loop {
+            match fs::read_to_string(pipe_path) {
+                Ok(command_str) => {
+                    info!("Received command string: {}", command_str);
+                    match serde_json::from_str::<SessionCommand>(&command_str) {
+                        Ok(command) => {
+                            info!("Parsed command: {:?}", command);
+                            match command {
+                                SessionCommand::Bind { source, target, mode } => {
+                                    info!("Processing bind command: {:?} -> {:?}", source, target);
+                                    match session.fs_manager.bind(&source, &target, mode) {
+                                        Ok(_) => {
+                                            info!("Bind operation successful, updating session state");
+                                            // Directly update session state here
+                                            if let Err(e) = session.notify_bind_success(source.clone(), target.clone()) {
+                                                error!("Failed to update session state: {}", e);
+                                            }
+                                            
+                                            // Debug: Print current state
+                                            let state = session.state.read();
+                                            info!("Current binds after update: {:?}", state.binds);
+                                            
+                                            // Force update of session file
+                                            let session_info = SessionInfo {
+                                                id: state.id.clone(),
+                                                pid: std::process::id() as i32,
+                                                root: state.root.clone(),
+                                                mounts: state.mounts.clone(),
+                                                binds: state.binds.clone(),
+                                            };
+                                            
+                                            if let Ok(session_json) = serde_json::to_string(&session_info) {
+                                                let session_file = format!("/tmp/froggr/sessions/{}", state.id);
+                                                if let Err(e) = fs::write(&session_file, session_json) {
+                                                    error!("Failed to update session file: {}", e);
+                                                } else {
+                                                    info!("Session file updated successfully");
+                                                }
+                                            }
+                                        }
+                                        Err(e) => error!("Bind operation failed: {}", e),
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => error!("Failed to parse command: {}", e),
+                    }
+                }
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::WouldBlock {
+                        error!("Error reading from pipe: {}", e);
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
     }
 }
 
@@ -475,4 +647,43 @@ impl Drop for Session {
             error!("Error sending shutdown message: {}", e);
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+struct SessionState {
+    id: String,
+    root: PathBuf,
+    mounts: Vec<(PathBuf, PathBuf)>,
+    binds: Vec<(PathBuf, PathBuf)>,
+}
+
+impl SessionState {
+    fn load<P: AsRef<Path>>(root: P, id: String) -> Result<Self> {
+        Ok(SessionState {
+            id,
+            root: root.as_ref().to_path_buf(),
+            mounts: Vec::new(),
+            binds: Vec::new(),
+        })
+    }
+
+    fn add_bind(&mut self, source: PathBuf, target: PathBuf) {
+        info!("Adding bind to state: {:?} -> {:?}", source, target);
+        self.binds.push((source, target));
+        info!("Current binds after update: {:?}", self.binds);
+    }
+
+    fn add_mount(&mut self, source: PathBuf, target: PathBuf) {
+        self.mounts.push((source, target));
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum SessionCommand {
+    Bind {
+        source: PathBuf,
+        target: PathBuf,
+        mode: BindMode,
+    },
+    // Add other commands as needed
 }

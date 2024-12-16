@@ -18,7 +18,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::UNIX_EPOCH;
-use log::{info, debug};
+use log::{info, debug, warn};
+use std::cell::RefCell;
+use std::sync::Arc;
+use crate::session::Session;
 
 #[cfg(target_os = "macos")]
 extern "C" {
@@ -47,6 +50,10 @@ struct DirectoryEntry {
 pub struct FilesystemManager {
     /// The underlying 9P filesystem implementation.
     pub fs: NineP,
+}
+
+thread_local! {
+    static CURRENT_SESSION: RefCell<Option<Arc<Session>>> = RefCell::new(None);
 }
 
 impl FilesystemManager {
@@ -308,6 +315,17 @@ impl FilesystemManager {
             .or_insert_with(Vec::new)
             .push(entry);
         self.bind_directory(abs_target.to_str().unwrap(), &abs_source, mode)?;
+        
+        // After successful bind
+        info!("Bind operation successful, notifying session");
+        if let Some(session) = self.get_session() {
+            info!("Found current session, sending notification");
+            session.notify_bind_success(source.to_path_buf(), target.to_path_buf())?;
+            info!("Notification sent successfully");
+        } else {
+            warn!("No current session found for bind notification");
+        }
+        
         Ok(())
     }
 
@@ -414,6 +432,38 @@ impl FilesystemManager {
                 eprintln!("Failed to unmount {}", path);
             }
         }
+    }
+
+    /// Gets the current session from thread-local storage.
+    /// 
+    /// # Returns
+    /// * `Some(Arc<Session>)` if there is a session associated with the current thread
+    /// * `None` if no session is currently associated
+    pub fn get_current_session() -> Option<Arc<Session>> {
+        CURRENT_SESSION.with(|current| current.borrow().clone())
+    }
+
+    /// Gets the current session associated with this filesystem manager instance.
+    /// 
+    /// This method retrieves the session from thread-local storage if one exists.
+    /// 
+    /// # Returns
+    /// * `Some(Arc<Session>)` if there is a session associated with the current thread
+    /// * `None` if no session is currently associated
+    pub fn get_session(&self) -> Option<Arc<Session>> {
+        Self::get_current_session()
+    }
+
+    /// Sets the current session for this filesystem manager.
+    /// 
+    /// This method stores the provided session in thread-local storage for later retrieval.
+    /// 
+    /// # Arguments
+    /// * `session` - The session to associate with the current thread
+    pub fn set_current_session(session: Arc<Session>) {
+        CURRENT_SESSION.with(|current| {
+            *current.borrow_mut() = Some(session);
+        });
     }
 }
 

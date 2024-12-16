@@ -5,12 +5,13 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-
+use std::str::FromStr;
+use serde::{Serialize, Deserialize};
 use super::constants::*;
 use super::proto::BoundEntry;
 
 /// Represents different modes for binding operations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BindMode {
     /// Replace existing content at the mountpoint
     Replace,
@@ -20,6 +21,20 @@ pub enum BindMode {
     After,
     /// Create mountpoint if needed
     Create,
+}
+
+impl FromStr for BindMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "before" => Ok(BindMode::Before),
+            "after" => Ok(BindMode::After),
+            "replace" => Ok(BindMode::Replace),
+            "create" => Ok(BindMode::Create),
+            _ => Err(format!("Invalid bind mode: {}", s)),
+        }
+    }
 }
 
 /// Entry in the namespace representing a bind operation
