@@ -70,6 +70,10 @@ frg --help                  # General help
 frg <command> --help        # Command-specific help
 ```
 
+## TODO
+
+Check the [issues with the `next release` label](https://github.com/doriancodes/froggr/issues?q=is%3Aissue+is%3Aopen+label%3A%22next+release%22) to know what's coming next.
+
 ## License
 
 BSD-3-Clause
