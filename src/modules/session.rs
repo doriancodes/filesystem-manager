@@ -234,42 +234,89 @@ impl SessionManager {
             Err(anyhow::anyhow!("Session not found"))
         }
     }
+
+    /// Gets a reference to an active session.
+    ///
+    /// # Arguments
+    /// * `session_id` - ID of the session to retrieve
+    ///
+    /// # Returns
+    /// * `Ok(Some(Arc<Session>))` if the session exists and is active
+    /// * `Ok(None)` if the session doesn't exist
+    /// * `Err` if there was an error accessing the session
+    pub fn get_active_session(&self, session_id: &str) -> Result<Option<Arc<Session>>> {
+        info!("Getting active session for ID: {}", session_id);
+        if let Some(session_info) = self.get_session(session_id)? {
+            // Create or get the session instance
+            let session = Session::new(session_info.root, session_id.to_string())?;
+            info!("Retrieved active session");
+            Ok(Some(session))
+        } else {
+            info!("No active session found for ID: {}", session_id);
+            Ok(None)
+        }
+    }
+
+    /// Sends a mount command to a running session.
+    ///
+    /// # Arguments
+    /// * `session_id` - ID of the target session
+    /// * `source` - Source path to mount from
+    /// * `target` - Target path to mount to
+    /// * `node_id` - Node identifier for the mount
+    ///
+    /// # Returns
+    /// * `Ok(())` if the command was sent successfully
+    /// * `Err` if the session doesn't exist or the command couldn't be sent
+    pub fn send_mount_command(&self, session_id: &str, source: PathBuf, target: PathBuf, node_id: String) -> Result<()> {
+        info!("Sending mount command to session {}", session_id);
+        if let Some(session) = self.get_session(session_id)? {
+            // Create a named pipe or socket for IPC
+            let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
+            if !pipe_path.exists() {
+                nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU)?;
+            }
+
+            // Write the mount command to the pipe
+            let command = SessionCommand::Mount {
+                source,
+                target,
+                node_id,
+            };
+            let command_str = serde_json::to_string(&command)?;
+            fs::write(&pipe_path, command_str)?;
+            info!("Mount command sent through pipe");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Session not found"))
+        }
+    }
 }
 
 /// Messages that can be sent to the session handler thread.
 #[derive(Debug)]
 enum SessionMessage {
-    /// Mount a filesystem
     Mount {
-        /// Source path to mount from
         source: PathBuf,
-        /// Target path to mount to
         target: PathBuf,
-        /// Node identifier for remote mounts
         node_id: String,
     },
-    /// Bind a directory
+    MountSuccess {
+        source: PathBuf,
+        target: PathBuf,
+    },
     Bind {
-        /// Source path to bind from
         source: PathBuf,
-        /// Target path to bind to
         target: PathBuf,
-        /// Binding mode
-        mode: crate::modules::namespace::BindMode,
+        mode: BindMode,
     },
-    /// Bind success
     BindSuccess {
-        /// Source path to bind from
         source: PathBuf,
-        /// Target path to bind to
         target: PathBuf,
     },
-    /// Unmount a filesystem
     Unmount {
-        /// Path to unmount
         path: PathBuf,
     },
-    /// Shutdown the session
     Shutdown,
 }
 
@@ -383,21 +430,95 @@ impl Session {
         while is_running.load(Ordering::SeqCst) {
             match rx.recv() {
                 Ok(message) => {
-                    info!("Received message: {:?}", message);
+                    info!("Message handler received: {:?}", message);
                     match message {
                         SessionMessage::Mount { source, target, node_id } => {
                             info!("Processing mount request: {:?} -> {:?} (node: {})", 
                                 source, target, node_id);
-                            if let Err(e) = fs_manager.mount(&source, &target, &node_id) {
-                                error!("Mount failed: {}", e);
-                            } else {
-                                state.write().add_mount(source, target);
+                            match fs_manager.mount(&source, &target, &node_id) {
+                                Ok(_) => {
+                                    info!("Mount successful, updating state");
+                                    let mut state = state.write();
+                                    state.add_mount(source.clone(), target.clone());
+                                    
+                                    // Update session info file immediately
+                                    let session_info = SessionInfo {
+                                        id: state.id.clone(),
+                                        pid: std::process::id() as i32,
+                                        root: state.root.clone(),
+                                        mounts: state.mounts.clone(),
+                                        binds: state.binds.clone(),
+                                    };
+                                    
+                                    drop(state); // Release the write lock
+                                    
+                                    if let Ok(session_json) = serde_json::to_string(&session_info) {
+                                        let session_file = format!("/tmp/froggr/sessions/{}", session_info.id);
+                                        info!("Updating session file: {}", session_file);
+                                        if let Err(e) = fs::write(&session_file, session_json) {
+                                            error!("Failed to update session file: {}", e);
+                                        } else {
+                                            info!("Session file updated successfully");
+                                        }
+                                    }
+                                }
+                                Err(e) => error!("Mount failed: {}", e),
+                            }
+                        },
+                        SessionMessage::MountSuccess { source, target } => {
+                            info!("Processing mount success: {:?} -> {:?}", source, target);
+                            let mut state = state.write();
+                            state.add_mount(source.clone(), target.clone());
+                            info!("Updated state with mount: {:?} -> {:?}", source, target);
+                            
+                            // Update session info file
+                            let session_info = SessionInfo {
+                                id: state.id.clone(),
+                                pid: std::process::id() as i32,
+                                root: state.root.clone(),
+                                mounts: state.mounts.clone(),
+                                binds: state.binds.clone(),
+                            };
+                            
+                            drop(state); // Release the write lock
+                            
+                            if let Ok(session_json) = serde_json::to_string(&session_info) {
+                                let session_file = format!("/tmp/froggr/sessions/{}", session_info.id);
+                                info!("Updating session file: {}", session_file);
+                                if let Err(e) = fs::write(&session_file, session_json) {
+                                    error!("Failed to update session file: {}", e);
+                                } else {
+                                    info!("Session file updated successfully");
+                                }
                             }
                         },
                         SessionMessage::Bind { source, target, mode } => {
                             info!("Processing bind request: {:?} -> {:?}", source, target);
                             if let Err(e) = fs_manager.bind(&source, &target, mode) {
                                 error!("Bind failed: {}", e);
+                            } else {
+                                info!("Bind successful, updating state");
+                                let mut state = state.write();
+                                state.add_bind(source.clone(), target.clone());
+                                info!("Current binds after update: {:?}", state.binds);
+                                
+                                // Update session info file
+                                let session_info = SessionInfo {
+                                    id: state.id.clone(),
+                                    pid: std::process::id() as i32,
+                                    root: state.root.clone(),
+                                    mounts: state.mounts.clone(),
+                                    binds: state.binds.clone(),
+                                };
+                                
+                                if let Ok(session_json) = serde_json::to_string(&session_info) {
+                                    let session_file = format!("/tmp/froggr/sessions/{}", state.id);
+                                    if let Err(e) = fs::write(&session_file, session_json) {
+                                        error!("Failed to update session file: {}", e);
+                                    } else {
+                                        info!("Session file updated successfully");
+                                    }
+                                }
                             }
                         },
                         SessionMessage::BindSuccess { source, target } => {
@@ -433,6 +554,29 @@ impl Session {
                             info!("Processing unmount request: {:?}", path);
                             if let Err(e) = fs_manager.unmount(&path, None) {
                                 error!("Unmount failed: {}", e);
+                            } else {
+                                info!("Unmount successful, updating state");
+                                let mut state = state.write();
+                                state.remove_mount(&path);
+                                info!("Current mounts after update: {:?}", state.mounts);
+                                
+                                // Update session info file
+                                let session_info = SessionInfo {
+                                    id: state.id.clone(),
+                                    pid: std::process::id() as i32,
+                                    root: state.root.clone(),
+                                    mounts: state.mounts.clone(),
+                                    binds: state.binds.clone(),
+                                };
+                                
+                                if let Ok(session_json) = serde_json::to_string(&session_info) {
+                                    let session_file = format!("/tmp/froggr/sessions/{}", state.id);
+                                    if let Err(e) = fs::write(&session_file, session_json) {
+                                        error!("Failed to update session file: {}", e);
+                                    } else {
+                                        info!("Session file updated successfully");
+                                    }
+                                }
                             }
                         },
                         SessionMessage::Shutdown => {
@@ -448,27 +592,6 @@ impl Session {
             }
         }
         info!("Message handler terminated");
-    }
-
-    /// Mount a filesystem at the specified path.
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - The source path to mount from
-    /// * `target` - The target path to mount to
-    /// * `node_id` - The node identifier for remote mounts
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` if the mount request was successfully queued
-    /// * `Err` if the request could not be sent
-    pub fn mount(&self, source: &Path, target: &Path, node_id: &str) -> Result<()> {
-        self.message_tx.send(SessionMessage::Mount {
-            source: source.to_path_buf(),
-            target: target.to_path_buf(),
-            node_id: node_id.to_string(),
-        })?;
-        Ok(())
     }
 
     /// Bind a source path to a target path.
@@ -585,6 +708,18 @@ impl Session {
                         Ok(command) => {
                             info!("Parsed command: {:?}", command);
                             match command {
+                                SessionCommand::Mount { source, target, node_id } => {
+                                    info!("Processing mount command: {:?} -> {:?}", source, target);
+                                    match session.fs_manager.mount(&source, &target, &node_id) {
+                                        Ok(_) => {
+                                            info!("Mount operation successful, notifying session");
+                                            if let Err(e) = session.notify_mount_success(source.clone(), target.clone()) {
+                                                error!("Failed to notify mount success: {}", e);
+                                            }
+                                        }
+                                        Err(e) => error!("Mount operation failed: {}", e),
+                                    }
+                                }
                                 SessionCommand::Bind { source, target, mode } => {
                                     info!("Processing bind command: {:?} -> {:?}", source, target);
                                     match session.fs_manager.bind(&source, &target, mode) {
@@ -634,6 +769,54 @@ impl Session {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
     }
+
+    /// Notifies the session of a successful mount operation and updates the session state.
+    ///
+    /// # Arguments
+    /// * `source` - The source path that was mounted
+    /// * `target` - The target path where the source was mounted
+    ///
+    /// # Returns
+    /// * `Ok(())` if the notification was successful
+    /// * `Err` if the state update or notification failed
+    pub fn notify_mount_success(&self, source: PathBuf, target: PathBuf) -> Result<()> {
+        info!("Notifying mount success: {:?} -> {:?}", source, target);
+        {
+            let mut state = self.state.write();
+            state.add_mount(source.clone(), target.clone());
+            info!("State updated, current mounts: {:?}", state.mounts);
+        }
+        
+        // Also send through message channel for consistency
+        self.message_tx.send(SessionMessage::MountSuccess { 
+            source, 
+            target 
+        })?;
+        
+        info!("Mount success notification sent");
+        Ok(())
+    }
+
+    /// Sends a mount request message to the session.
+    ///
+    /// # Arguments
+    /// * `source` - Source path to mount from
+    /// * `target` - Target path to mount to
+    /// * `node_id` - Node identifier for the mount
+    ///
+    /// # Returns
+    /// * `Ok(())` if the message was sent successfully
+    /// * `Err` if the message could not be sent
+    pub fn mount(&self, source: PathBuf, target: PathBuf, node_id: String) -> Result<()> {
+        info!("Sending mount message to session");
+        self.message_tx.send(SessionMessage::Mount {
+            source: source.clone(),
+            target: target.clone(),
+            node_id,
+        })?;
+        info!("Mount message sent successfully");
+        Ok(())
+    }
 }
 
 /// Implements cleanup on drop.
@@ -667,14 +850,25 @@ impl SessionState {
         })
     }
 
+    fn add_mount(&mut self, source: PathBuf, target: PathBuf) {
+        info!("Adding mount to state: {:?} -> {:?}", source, target);
+        // Remove any existing mount for this target
+        self.mounts.retain(|(_, t)| t != &target);
+        // Add the new mount
+        self.mounts.push((source, target));
+        info!("Current mounts after update: {:?}", self.mounts);
+    }
+
+    fn remove_mount(&mut self, path: &Path) {
+        info!("Removing mount for path: {:?}", path);
+        self.mounts.retain(|(_, target)| target != path);
+        info!("Current mounts after removal: {:?}", self.mounts);
+    }
+
     fn add_bind(&mut self, source: PathBuf, target: PathBuf) {
         info!("Adding bind to state: {:?} -> {:?}", source, target);
         self.binds.push((source, target));
         info!("Current binds after update: {:?}", self.binds);
-    }
-
-    fn add_mount(&mut self, source: PathBuf, target: PathBuf) {
-        self.mounts.push((source, target));
     }
 }
 
@@ -684,6 +878,11 @@ enum SessionCommand {
         source: PathBuf,
         target: PathBuf,
         mode: BindMode,
+    },
+    Mount {
+        source: PathBuf,
+        target: PathBuf,
+        node_id: String,
     },
     // Add other commands as needed
 }

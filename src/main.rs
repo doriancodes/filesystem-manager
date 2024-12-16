@@ -95,8 +95,29 @@ async fn main() -> Result<()> {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
         Commands::Mount { source, mount_point, node_id } => {
+            info!("Starting mount operation");
+            let session_manager = SessionManager::new()?;
             let session_id = session_manager.create_session(mount_point.clone())?;
             println!("Created new session: {}", session_id);
+
+            if let Some(session_info) = session_manager.get_session(&session_id)? {
+                info!("Found session with PID {}", session_info.pid);
+                session_manager.send_mount_command(
+                    &session_id,
+                    source.clone(),
+                    mount_point.clone(),
+                    node_id.clone()
+                )?;
+                info!("Mount command sent to session");
+                
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                
+                if let Some(updated_info) = session_manager.get_session(&session_id)? {
+                    info!("Current mounts: {:?}", updated_info.mounts);
+                }
+            } else {
+                error!("No session found for mount operation");
+            }
         }
         Commands::Session { list, kill, purge, session_id } => {
             if *list {

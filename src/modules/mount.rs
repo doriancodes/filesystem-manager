@@ -334,54 +334,55 @@ impl FilesystemManager {
     /// # Arguments
     /// 
     /// * `source` - The source path to mount
-    /// * `mount_point` - Where to mount the filesystem
+    /// * `target` - The target path to mount
     /// * `node_id` - Optional remote node identifier
     /// 
     /// # Returns
     /// 
     /// A Result indicating success or failure
-    pub fn mount(&self, source: &Path, mount_point: &Path, node_id: &str) -> Result<()> {
-        let abs_local = fs::canonicalize(mount_point)?;
+    pub fn mount(&self, source: &Path, target: &Path, node_id: &str) -> Result<()> {
+        info!("Mounting {} to {} for node {}", source.display(), target.display(), node_id);
+        
+        // Resolve paths
+        let abs_source = fs::canonicalize(source)?;
+        let abs_target = fs::canonicalize(target)?;
+        info!("Resolved paths - source: {:?}, target: {:?}", abs_source, abs_target);
 
-        if !abs_local.exists() {
-            return Err(anyhow!("Local mount point does not exist"));
+        // Verify paths exist
+        if !abs_source.exists() {
+            return Err(anyhow!("Source path does not exist: {:?}", abs_source));
+        }
+        if !abs_target.exists() {
+            return Err(anyhow!("Target path does not exist: {:?}", abs_target));
         }
 
+        // Create mount entry
         let entry = NamespaceEntry {
-            source: source.to_path_buf(),
-            target: abs_local.clone(),
-            bind_mode: BindMode::Replace,
+            source: abs_source.clone(),
+            target: abs_target.clone(),
+            bind_mode: BindMode::Before, // Default mode for mounts
             remote_node: Some(node_id.to_string()),
         };
 
+        // Update namespace
         let mut namespace = self.fs.namespace_manager.namespace.write().unwrap();
         namespace
-            .entry(abs_local.clone())
+            .entry(abs_target.clone())
             .or_insert_with(Vec::new)
             .push(entry);
 
-        let mount_thread = {
-            let remote_path_clone = source.to_path_buf();
-            let hello_fs_clone = self.fs.clone();
-            thread::spawn(move || {
-                fuser::mount2(hello_fs_clone, &remote_path_clone, &[]).unwrap();
-            })
-        };
+        // Perform the mount operation
+        self.mount_directory(abs_target.to_str().unwrap(), &abs_source)?;
 
-        // Signal handling
-        let mut signals = Signals::new(&[SIGINT, SIGTERM])?;
-        for sig in signals.forever() {
-            match sig {
-                SIGINT | SIGTERM => {
-                    println!("Received signal, unmounting...");
-                    Self::handle_unmount(source.to_str().unwrap());
-                    break;
-                }
-                _ => {}
-            }
+        // Notify session of successful mount
+        info!("Mount operation successful, notifying session");
+        if let Some(session) = FilesystemManager::get_current_session() {
+            info!("Found current session, sending notification");
+            session.notify_mount_success(source.to_path_buf(), target.to_path_buf())?;
+            info!("Mount success notification sent");
+        } else {
+            warn!("No current session found for mount notification");
         }
-
-        mount_thread.join().unwrap();
 
         Ok(())
     }
@@ -464,6 +465,51 @@ impl FilesystemManager {
         CURRENT_SESSION.with(|current| {
             *current.borrow_mut() = Some(session);
         });
+    }
+
+    /// Internal method to mount a directory.
+    /// 
+    /// # Arguments
+    /// * `dir_path` - The target directory path to mount to
+    /// * `source_path` - The source directory path to mount from
+    /// 
+    /// # Returns
+    /// * `Result<()>` indicating success or failure
+    fn mount_directory(&self, dir_path: &str, source_path: &Path) -> Result<()> {
+        debug!("Mounting directory: {} from source: {:?}", dir_path, source_path);
+
+        let mut bindings = self.fs.namespace_manager.bindings.lock().unwrap();
+        let mut next_inode = self.fs.namespace_manager.next_inode.lock().unwrap();
+
+        // Convert paths to absolute paths
+        let abs_source = fs::canonicalize(source_path)?;
+        let abs_target = fs::canonicalize(Path::new(dir_path))?;
+
+        info!(
+            "Resolved paths - source: {:?}, target: {:?}",
+            abs_source, abs_target
+        );
+
+        // Clear existing bindings but keep root
+        bindings.retain(|&ino, _| ino == 1);
+
+        // Read source directory recursively
+        self.read_directory_entries_recursive(
+            &abs_source,
+            &abs_source,
+            1,
+            &mut next_inode,
+            &mut bindings,
+        )?;
+
+        info!("Final bindings: {:?}", bindings.keys().collect::<Vec<_>>());
+        for (inode, (name, entry)) in bindings.iter() {
+            debug!(
+                "inode: {}, name: {:?}, kind: {:?}",
+                inode, name, entry.attr.kind
+            );
+        }
+        Ok(())
     }
 }
 
