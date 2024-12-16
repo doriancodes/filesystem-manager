@@ -12,6 +12,140 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::collections::HashMap;
+use std::fs;
+use serde::{Serialize, Deserialize};
+use uuid::Uuid;
+use nix::unistd::{fork, ForkResult};
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
+use tokio::signal::ctrl_c;
+
+/// Information about a running filesystem session.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionInfo {
+    /// Unique identifier for the session
+    pub id: String,
+    /// Process ID of the session
+    pub pid: i32,
+    /// Root directory path for the session
+    pub root: PathBuf,
+    /// List of active mounts (source, target)
+    pub mounts: Vec<(PathBuf, PathBuf)>,
+    /// List of active binds (source, target)
+    pub binds: Vec<(PathBuf, PathBuf)>,
+}
+
+/// Manages filesystem sessions, including creation, listing, and termination.
+pub struct SessionManager {
+    /// Directory where session information is stored
+    sessions_dir: PathBuf,
+}
+
+impl SessionManager {
+    /// Creates a new SessionManager.
+    ///
+    /// Initializes the sessions directory at `/tmp/froggr/sessions`.
+    ///
+    /// # Returns
+    /// * `Ok(SessionManager)` on success
+    /// * `Err` if the sessions directory cannot be created
+    pub fn new() -> Result<Self> {
+        let sessions_dir = PathBuf::from("/tmp/froggr/sessions");
+        fs::create_dir_all(&sessions_dir)?;
+        Ok(Self { sessions_dir })
+    }
+
+    /// Creates a new filesystem session.
+    ///
+    /// Forks a new process to run the session and stores session information.
+    ///
+    /// # Arguments
+    /// * `root` - Root directory path for the new session
+    ///
+    /// # Returns
+    /// * `Ok(String)` - Session ID of the created session
+    /// * `Err` if session creation fails
+    pub fn create_session(&self, root: PathBuf) -> Result<String> {
+        let session_id = Uuid::new_v4().to_string();
+        
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent { child }) => {
+                let session_info = SessionInfo {
+                    id: session_id.clone(),
+                    pid: child.as_raw(),
+                    root: root.clone(),
+                    mounts: Vec::new(),
+                    binds: Vec::new(),
+                };
+                
+                let session_file = self.sessions_dir.join(&session_id);
+                fs::write(&session_file, serde_json::to_string(&session_info)?)?;
+                
+                info!("Created new session: {}", session_id);
+                Ok(session_id)
+            }
+            Ok(ForkResult::Child) => {
+                // Create a new runtime in the child process
+                std::thread::spawn(move || {
+                    let runtime = tokio::runtime::Runtime::new().unwrap();
+                    let session = Session::new(root).unwrap();
+                    
+                    runtime.block_on(async {
+                        if let Err(e) = session.run().await {
+                            error!("Session error: {}", e);
+                        }
+                    });
+                });
+                
+                // Keep the process alive
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+            Err(e) => Err(anyhow::anyhow!("Fork failed: {}", e)),
+        }
+    }
+
+    /// Lists all active sessions.
+    ///
+    /// # Returns
+    /// * `Ok(Vec<SessionInfo>)` - Information about all active sessions
+    /// * `Err` if reading session information fails
+    pub fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
+        let mut sessions = Vec::new();
+        for entry in fs::read_dir(&self.sessions_dir)? {
+            let entry = entry?;
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                if let Ok(info) = serde_json::from_str(&content) {
+                    sessions.push(info);
+                }
+            }
+        }
+        Ok(sessions)
+    }
+
+    /// Terminates a specific session.
+    ///
+    /// # Arguments
+    /// * `session_id` - ID of the session to terminate
+    ///
+    /// # Returns
+    /// * `Ok(())` if the session was successfully terminated
+    /// * `Err` if the session doesn't exist or termination fails
+    pub fn kill_session(&self, session_id: &str) -> Result<()> {
+        let session_file = self.sessions_dir.join(session_id);
+        if let Ok(content) = fs::read_to_string(&session_file) {
+            let info: SessionInfo = serde_json::from_str(&content)?;
+            signal::kill(Pid::from_raw(info.pid), Signal::SIGTERM)?;
+            fs::remove_file(session_file)?;
+            info!("Killed session: {}", session_id);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Session not found"))
+        }
+    }
+}
 
 /// Messages that can be sent to the session handler thread.
 #[derive(Debug)]
@@ -259,6 +393,24 @@ impl Session {
         thread
             .join()
             .map_err(|_| anyhow::anyhow!("Failed to join message thread"))?;
+        Ok(())
+    }
+
+    /// Runs the session in a loop until a shutdown signal is received.
+    ///
+    /// # Returns
+    /// * `Ok(())` if the session shuts down cleanly
+    /// * `Err` if an error occurs during session execution
+    pub async fn run(self) -> Result<()> {
+        info!("Session running. Waiting for shutdown signal...");
+        
+        // Wait for shutdown signal
+        ctrl_c().await?;
+        info!("Received shutdown signal");
+        
+        self.shutdown()?;
+        info!("Session terminated");
+        
         Ok(())
     }
 }

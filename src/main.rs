@@ -2,12 +2,13 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use env_logger;
 use froggr::modules::namespace::BindMode;
-use froggr::session::Session;
+use froggr::modules::session::{Session, SessionManager};
 use froggr::{FilesystemManager, NineP};
 use log::{error, info, LevelFilter};
 use std::env;
 use std::path::PathBuf;
 use tokio::signal;
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -51,6 +52,13 @@ enum Commands {
         #[arg(default_value = "localhost")]
         node_id: String,
     },
+    /// List all active sessions
+    Sessions,
+    /// Kill a specific session
+    Kill {
+        /// Session ID to kill
+        session_id: String,
+    },
 }
 
 #[tokio::main]
@@ -68,6 +76,8 @@ async fn main() -> Result<()> {
 
     info!("Starting froggr...");
 
+    let session_manager = SessionManager::new()?;
+
     match &cli.command {
         Commands::Bind {
             before,
@@ -84,32 +94,34 @@ async fn main() -> Result<()> {
                 _ => BindMode::Before,
             };
 
-            let session = Session::new(target.clone())?;
-
-            session
-                .fs_manager
-                .bind(source.as_path(), target.as_path(), bind_mode)?;
-            info!(
-                "Successfully bound {} to {}",
-                source.display(),
-                target.display()
-            );
+            let session_id = session_manager.create_session(target.clone())?;
+            // Initialize binding in the new session
+            println!("Created new session: {}", session_id);
         }
         Commands::Mount {
             source,
             mount_point,
             node_id,
         } => {
-            let session = Session::new(source.clone())?;
-
-            session
-                .fs_manager
-                .mount(&source.as_path(), &mount_point.as_path(), &node_id)?;
-            info!(
-                "Successfully mounted {} to {}",
-                source.display(),
-                mount_point.display()
-            );
+            let session_id = session_manager.create_session(source.clone())?;
+            // Initialize mounting in the new session
+            println!("Created new session: {}", session_id);
+        }
+        Commands::Sessions => {
+            let sessions = session_manager.list_sessions()?;
+            println!("Active sessions:");
+            for session in sessions {
+                println!("ID: {}", session.id);
+                println!("  PID: {}", session.pid);
+                println!("  Root: {}", session.root.display());
+                println!("  Mounts: {:?}", session.mounts);
+                println!("  Binds: {:?}", session.binds);
+                println!();
+            }
+        }
+        Commands::Kill { session_id } => {
+            session_manager.kill_session(session_id)?;
+            println!("Session {} terminated", session_id);
         }
     }
 
