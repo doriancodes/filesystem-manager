@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 //! Filesystem mounting and management functionality.
 //! 
 //! This module provides the core functionality for mounting and managing
@@ -8,15 +10,12 @@ use super::namespace::{BindMode, NamespaceEntry};
 use super::proto::{BoundEntry, NineP};
 use anyhow::{anyhow, Result};
 use fuser::{FileAttr, FileType};
-use libc::{SIGINT, SIGTERM};
-use signal_hook::iterator::Signals;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::thread;
+use std::path::Path;
 use std::time::UNIX_EPOCH;
 use log::{info, debug, warn};
 use std::cell::RefCell;
@@ -36,13 +35,6 @@ extern "C" {
 #[cfg(target_os = "linux")]
 extern "C" {
     pub fn umount(path: *const i8) -> i32;
-}
-
-#[derive(Clone)]
-struct DirectoryEntry {
-    name: String,
-    path: PathBuf,
-    metadata: fs::Metadata,
 }
 
 /// Manages filesystem mounting and binding operations.
@@ -103,7 +95,7 @@ impl FilesystemManager {
         let mut queue = VecDeque::new();
         queue.push_back((current_path.to_path_buf(), parent_inode));
 
-        while let Some((path, parent)) = queue.pop_front() {
+        while let Some((path, _)) = queue.pop_front() {
             for entry in fs::read_dir(&path)? {
                 let entry = entry?;
                 let metadata = entry.metadata()?;

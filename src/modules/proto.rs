@@ -1,3 +1,5 @@
+#![allow(unused_variables,dead_code)]
+
 //! 9P protocol implementation and filesystem operations.
 //! 
 //! This module provides the core 9P protocol implementation through the `NineP` type,

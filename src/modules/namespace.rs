@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 use anyhow::Result;
 use fuser::{FileAttr, FileType};
 use std::collections::HashMap;

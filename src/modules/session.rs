@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 //! Session management for filesystem operations.
 //!
 //! This module provides the `Session` type which manages filesystem sessions
@@ -12,7 +14,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::collections::HashMap;
 use std::fs;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;

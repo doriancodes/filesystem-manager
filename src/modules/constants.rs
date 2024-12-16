@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 //! Constant values used throughout the filesystem implementation.
 //! 
 //! This module defines various constants used for filesystem operations,

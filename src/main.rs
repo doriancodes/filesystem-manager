@@ -2,10 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use froggr::modules::namespace::BindMode;
 use froggr::modules::session::SessionManager;
-use froggr::FilesystemManager;
 use log::{error, info};
 use std::path::PathBuf;
-use std::str::FromStr;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
