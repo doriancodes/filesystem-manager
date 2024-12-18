@@ -70,6 +70,25 @@ impl SessionManager {
     /// * `Ok(String)` - Session ID of the created session
     /// * `Err` if session creation fails
     pub fn create_session(&self, root: PathBuf) -> Result<String> {
+        // First, check if there's an existing session for this root
+        let existing_sessions = self.list_sessions()?;
+        for session in existing_sessions {
+            if session.root == root {
+                // Verify the session is still active by checking the process
+                if let Ok(_) = signal::kill(Pid::from_raw(session.pid), Signal::SIGCONT) {
+                    info!("Reusing existing session {} for root {}", session.id, root.display());
+                    return Ok(session.id);
+                } else {
+                    // Session is dead, remove its file and continue to create new session
+                    let session_file = self.sessions_dir.join(&session.id);
+                    if let Err(e) = fs::remove_file(session_file) {
+                        error!("Failed to remove dead session file: {}", e);
+                    }
+                }
+            }
+        }
+
+        // If no existing valid session found, create a new one
         let session_id = Uuid::new_v4().to_string();
         
         match unsafe { fork() } {
@@ -85,18 +104,26 @@ impl SessionManager {
                 let session_file = self.sessions_dir.join(&session_id);
                 fs::write(&session_file, serde_json::to_string(&session_info)?)?;
                 
-                info!("Created new session: {}", session_id);
+                // Wait a moment for the child process to set up
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                
+                info!("Created new session: {} for root {}", session_id, root.display());
                 Ok(session_id)
             }
             Ok(ForkResult::Child) => {
                 let runtime = tokio::runtime::Runtime::new()?;
-                let session = Session::new(root.clone(), session_id)?;
+                let session = Session::new(root.clone(), session_id.clone())?;
                 let session_clone = session.clone();
 
-                // Store session in thread-local storage
                 FilesystemManager::set_current_session(session.clone());
 
                 info!("Session stored in thread-local storage");
+
+                // Create the pipe immediately
+                let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
+                if !pipe_path.exists() {
+                    nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU)?;
+                }
 
                 std::thread::spawn(move || {
                     runtime.block_on(async {
@@ -216,19 +243,28 @@ impl SessionManager {
     pub fn send_bind_command(&self, session_id: &str, source: PathBuf, target: PathBuf, mode: BindMode) -> Result<()> {
         info!("Sending bind command to session {}", session_id);
         if let Some(session) = self.get_session(session_id)? {
-            // Create a named pipe or socket for IPC
+            // Ensure the pipe exists
             let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
             if !pipe_path.exists() {
                 nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU)?;
             }
 
             // Write the bind command to the pipe
-            let command = serde_json::to_string(&SessionCommand::Bind {
+            let command = SessionCommand::Bind {
                 source,
                 target,
                 mode,
-            })?;
-            fs::write(&pipe_path, command)?;
+            };
+            let command_str = serde_json::to_string(&command)?;
+            
+            // Open pipe for writing
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&pipe_path)?;
+            
+            use std::io::Write;
+            file.write_all(command_str.as_bytes())?;
+            
             info!("Bind command sent through pipe");
             Ok(())
         } else {
