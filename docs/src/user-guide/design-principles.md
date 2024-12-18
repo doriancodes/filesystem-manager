@@ -1,5 +1,41 @@
 # Design Principles
 
+```mermaid
+graph TD
+    subgraph CLI
+        A[CLI Interface] --> B[Command Parser]
+        B --> C{Commands}
+        C -->|Bind| D[Bind Command]
+        C -->|Mount| E[Mount Command]
+        C -->|Session| F[Session Management]
+    end
+
+    subgraph Session Management
+        G[Session Manager] --> H[Session State]
+        G --> I[Named Pipes]
+        H --> J[Session Info Files]
+        G --> K[Process Management]
+    end
+
+    subgraph Filesystem Operations
+        L[Filesystem Manager] --> M[9P Protocol]
+        L --> N[Mount Operations]
+        L --> O[Bind Operations]
+    end
+
+    D --> G
+    E --> G
+    F --> G
+    I --> L
+    K --> L
+
+    subgraph Storage
+        P[/tmp/froggr/sessions/]
+        J --> P
+        I --> P
+    end
+```
+
 Froggr is built on several key design principles that guide its development and usage:
 
 ## 1. Plan 9 Inspiration

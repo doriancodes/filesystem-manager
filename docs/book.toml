@@ -6,6 +6,10 @@ src = "src"
 title = "froggr User Guide"
 description = "🐸 Simple file system implementation using the 9P protocol"
 
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
 [output.html]
 git-repository-url = "https://github.com/doriancodes/froggr"
 git-repository-icon = "fa-github"
+additional-js = ["theme/mermaid.min.js", "theme/mermaid-init.js"]

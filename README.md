@@ -49,7 +49,7 @@ cargo install froggr
 
 ## User Guide
 
-The user guide is available online at [doriancodes.github.io/froggr](https://doriancodes.github.io/froggr/) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). To build and serve the documentation locally:
+The user guide is available online at [doriancodes.github.io/froggr](https://doriancodes.github.io/froggr/) and can be built locally using [mdBook](https://rust-lang.github.io/mdBook/). You need to have `mdbook-mermaid` to properly render the diagrams. To build and serve the documentation locally:
 
 ```bash
 mdbook serve docs/
