@@ -176,6 +176,40 @@
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="design-principles"><a class="header" href="#design-principles">Design Principles</a></h1>
+<pre><code class="language-mermaid">graph TD
+    subgraph CLI
+        A[CLI Interface] --&gt; B[Command Parser]
+        B --&gt; C{Commands}
+        C --&gt;|Bind| D[Bind Command]
+        C --&gt;|Mount| E[Mount Command]
+        C --&gt;|Session| F[Session Management]
+    end
+
+    subgraph Session Management
+        G[Session Manager] --&gt; H[Session State]
+        G --&gt; I[Named Pipes]
+        H --&gt; J[Session Info Files]
+        G --&gt; K[Process Management]
+    end
+
+    subgraph Filesystem Operations
+        L[Filesystem Manager] --&gt; M[9P Protocol]
+        L --&gt; N[Mount Operations]
+        L --&gt; O[Bind Operations]
+    end
+
+    D --&gt; G
+    E --&gt; G
+    F --&gt; G
+    I --&gt; L
+    K --&gt; L
+
+    subgraph Storage
+        P[/tmp/froggr/sessions/]
+        J --&gt; P
+        I --&gt; P
+    end
+</code></pre>
 <p>Froggr is built on several key design principles that guide its development and usage:</p>
 <h2 id="1-plan-9-inspiration"><a class="header" href="#1-plan-9-inspiration">1. Plan 9 Inspiration</a></h2>
 <p>Froggr draws heavy inspiration from Plan 9's filesystem architecture, particularly its approach to namespace management. Like Plan 9, Froggr treats everything as a file and uses filesystem operations to manage system resources.</p>
@@ -328,6 +362,622 @@
 <li>Stackable directory views</li>
 </ul>
 <p>This design ensures that bind operations are reliable, predictable, and maintainable while providing the flexibility needed for complex namespace configurations.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="mount-operation-design"><a class="header" href="#mount-operation-design">Mount Operation Design</a></h1>
+<p>The mount operation is a core functionality in Froggr that enables attaching directories into the filesystem hierarchy using the 9P protocol.</p>
+<h2 id="process-overview-1"><a class="header" href="#process-overview-1">Process Overview</a></h2>
+<pre><code class="language-mermaid">sequenceDiagram
+    participant User
+    participant CLI
+    participant SessionManager
+    participant Session
+    participant FilesystemManager
+    participant 9P
+
+    User-&gt;&gt;CLI: frg mount /source /target
+    CLI-&gt;&gt;SessionManager: create_session(/target)
+    
+    alt Session exists for target
+        SessionManager--&gt;&gt;CLI: Return existing session ID
+    else No existing session
+        SessionManager-&gt;&gt;Session: Create new session
+        Session-&gt;&gt;FilesystemManager: Initialize
+        Session--&gt;&gt;SessionManager: Return new session ID
+    end
+    
+    CLI-&gt;&gt;SessionManager: send_mount_command(session_id, /source, /target)
+    SessionManager-&gt;&gt;Session: Send via named pipe
+    Session-&gt;&gt;FilesystemManager: mount(/source, /target)
+    FilesystemManager-&gt;&gt;9P: Setup 9P connection
+    
+    9P--&gt;&gt;FilesystemManager: Connection established
+    FilesystemManager--&gt;&gt;Session: Mount successful
+    Session-&gt;&gt;SessionManager: Update session state
+    SessionManager--&gt;&gt;CLI: Operation complete
+    CLI--&gt;&gt;User: Mount successful
+</code></pre>
+<h2 id="key-components"><a class="header" href="#key-components">Key Components</a></h2>
+<h3 id="session-management"><a class="header" href="#session-management">Session Management</a></h3>
+<ul>
+<li>Each mount operation is associated with a session</li>
+<li>Sessions can be reused for the same target directory</li>
+<li>Session state persists mount information</li>
+<li>Clean session termination unmounts all directories</li>
+</ul>
+<h3 id="9p-protocol-integration"><a class="header" href="#9p-protocol-integration">9P Protocol Integration</a></h3>
+<ul>
+<li>Uses 9P protocol for filesystem operations</li>
+<li>Supports remote and local mounts</li>
+<li>Maintains connection state</li>
+<li>Handles protocol-specific messaging</li>
+</ul>
+<h3 id="mount-points"><a class="header" href="#mount-points">Mount Points</a></h3>
+<ul>
+<li>Target directory becomes a mount point</li>
+<li>Source directory content becomes accessible</li>
+<li>Permissions are preserved</li>
+<li>Path resolution follows mount hierarchy</li>
+</ul>
+<h2 id="usage-examples"><a class="header" href="#usage-examples">Usage Examples</a></h2>
+<h3 id="basic-mount"><a class="header" href="#basic-mount">Basic Mount</a></h3>
+<pre><code class="language-bash"># Mount a local directory
+frg mount /source/dir /mount/point
+
+# Mount with custom node identifier
+frg mount /source/dir /mount/point custom-node
+</code></pre>
+<h3 id="common-use-cases"><a class="header" href="#common-use-cases">Common Use Cases</a></h3>
+<ol>
+<li>
+<p><strong>Local Directory Mounting</strong></p>
+<pre><code class="language-bash">frg mount /home/user/data /mnt/data
+</code></pre>
+</li>
+<li>
+<p><strong>Remote Directory Mounting</strong></p>
+<pre><code class="language-bash">frg mount remote:/data /mnt/remote-data
+</code></pre>
+</li>
+<li>
+<p><strong>Temporary Mounts</strong></p>
+<pre><code class="language-bash">frg mount /tmp/source /mnt/temp
+</code></pre>
+</li>
+</ol>
+<h2 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h2>
+<p>The mount operation includes robust error handling for common scenarios:</p>
+<ul>
+<li>Target directory doesn't exist</li>
+<li>Source is not accessible</li>
+<li>Permission denied</li>
+<li>Network connection issues (for remote mounts)</li>
+<li>Session creation failures</li>
+</ul>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li>
+<p><strong>Path Selection</strong></p>
+<ul>
+<li>Use absolute paths for clarity</li>
+<li>Ensure target directory exists</li>
+<li>Verify permissions beforehand</li>
+</ul>
+</li>
+<li>
+<p><strong>Session Management</strong></p>
+<ul>
+<li>One session per target directory</li>
+<li>Clean up unused sessions</li>
+<li>Monitor session state</li>
+</ul>
+</li>
+<li>
+<p><strong>Resource Management</strong></p>
+<ul>
+<li>Unmount when no longer needed</li>
+<li>Don't mount over existing mount points</li>
+<li>Check available resources</li>
+</ul>
+</li>
+</ol>
+<h2 id="implementation-details"><a class="header" href="#implementation-details">Implementation Details</a></h2>
+<h3 id="mount-process-steps"><a class="header" href="#mount-process-steps">Mount Process Steps</a></h3>
+<ol>
+<li>
+<p><strong>Initialization</strong></p>
+<ul>
+<li>Validate paths</li>
+<li>Check permissions</li>
+<li>Create/reuse session</li>
+</ul>
+</li>
+<li>
+<p><strong>Setup</strong></p>
+<ul>
+<li>Establish 9P connection</li>
+<li>Configure mount parameters</li>
+<li>Prepare target directory</li>
+</ul>
+</li>
+<li>
+<p><strong>Execution</strong></p>
+<ul>
+<li>Perform mount operation</li>
+<li>Update session state</li>
+<li>Verify mount success</li>
+</ul>
+</li>
+<li>
+<p><strong>Cleanup</strong></p>
+<ul>
+<li>Handle any errors</li>
+<li>Update mount registry</li>
+<li>Log operation result</li>
+</ul>
+</li>
+</ol>
+<h3 id="state-management"><a class="header" href="#state-management">State Management</a></h3>
+<p>The mount operation maintains state information including:</p>
+<ul>
+<li>Active mount points</li>
+<li>Session associations</li>
+<li>Connection details</li>
+<li>Resource usage</li>
+</ul>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<p>Common issues and solutions:</p>
+<ol>
+<li>
+<p><strong>Mount Failed</strong></p>
+<ul>
+<li>Check source directory exists</li>
+<li>Verify target directory permissions</li>
+<li>Ensure no conflicting mounts</li>
+</ul>
+</li>
+<li>
+<p><strong>Session Issues</strong></p>
+<ul>
+<li>List active sessions (<code>frg session -l</code>)</li>
+<li>Check session state</li>
+<li>Try purging dead sessions</li>
+</ul>
+</li>
+<li>
+<p><strong>Permission Problems</strong></p>
+<ul>
+<li>Verify user permissions</li>
+<li>Check directory ownership</li>
+<li>Review mount point access</li>
+</ul>
+</li>
+</ol>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="user-guide/design-principles/./bind-operations.html">Bind Operations</a></li>
+<li><a href="user-guide/design-principles/./session-management.html">Session Management</a></li>
+<li><a href="user-guide/design-principles/./9p-protocol.html">9P Protocol</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="session-management-1"><a class="header" href="#session-management-1">Session Management</a></h1>
+<p>Session management is a critical component of Froggr that handles the lifecycle of filesystem operations and maintains state across multiple commands.</p>
+<h2 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h2>
+<pre><code class="language-mermaid">graph TD
+    subgraph Session Creation
+        A[User Command] --&gt; B[SessionManager]
+        B --&gt; C{Session Exists?}
+        C --&gt;|Yes| D[Reuse Session]
+        C --&gt;|No| E[Create New Session]
+        E --&gt; F[Initialize State]
+    end
+
+    subgraph Session State
+        G[Active Mounts]
+        H[Active Binds]
+        I[Process Info]
+        J[Named Pipes]
+    end
+
+    subgraph Lifecycle Management
+        K[Monitor Health]
+        L[Handle Cleanup]
+        M[State Recovery]
+    end
+
+    F --&gt; G
+    F --&gt; H
+    F --&gt; I
+    F --&gt; J
+    D --&gt; G
+    K --&gt; L
+    L --&gt; M
+</code></pre>
+<h2 id="session-components"><a class="header" href="#session-components">Session Components</a></h2>
+<h3 id="session-identity"><a class="header" href="#session-identity">Session Identity</a></h3>
+<ul>
+<li>Unique session ID (UUID)</li>
+<li>Process ID (PID)</li>
+<li>Root directory path</li>
+<li>Creation timestamp</li>
+</ul>
+<h3 id="state-management-1"><a class="header" href="#state-management-1">State Management</a></h3>
+<ul>
+<li>Active mount points</li>
+<li>Active bind points</li>
+<li>Resource tracking</li>
+<li>Operation history</li>
+</ul>
+<h3 id="communication-channels"><a class="header" href="#communication-channels">Communication Channels</a></h3>
+<ul>
+<li>Named pipes for IPC</li>
+<li>Command routing</li>
+<li>State updates</li>
+<li>Error reporting</li>
+</ul>
+<h2 id="lifecycle-phases"><a class="header" href="#lifecycle-phases">Lifecycle Phases</a></h2>
+<ol>
+<li>
+<p><strong>Creation</strong></p>
+<ul>
+<li>Generate session ID</li>
+<li>Fork process</li>
+<li>Initialize state</li>
+<li>Setup communication channels</li>
+</ul>
+</li>
+<li>
+<p><strong>Operation</strong></p>
+<ul>
+<li>Handle mount/bind requests</li>
+<li>Maintain state consistency</li>
+<li>Process commands</li>
+<li>Monitor health</li>
+</ul>
+</li>
+<li>
+<p><strong>Termination</strong></p>
+<ul>
+<li>Clean up resources</li>
+<li>Unmount filesystems</li>
+<li>Remove bind points</li>
+<li>Delete session files</li>
+</ul>
+</li>
+</ol>
+<h2 id="command-interface"><a class="header" href="#command-interface">Command Interface</a></h2>
+<h3 id="list-sessions"><a class="header" href="#list-sessions">List Sessions</a></h3>
+<pre><code class="language-bash">frg session -l
+frg session --list
+</code></pre>
+<h3 id="kill-session"><a class="header" href="#kill-session">Kill Session</a></h3>
+<pre><code class="language-bash">frg session -k &lt;session-id&gt;
+frg session --kill &lt;session-id&gt;
+</code></pre>
+<h3 id="purge-all-sessions"><a class="header" href="#purge-all-sessions">Purge All Sessions</a></h3>
+<pre><code class="language-bash">frg session -p
+frg session --purge
+</code></pre>
+<h3 id="show-session-details"><a class="header" href="#show-session-details">Show Session Details</a></h3>
+<pre><code class="language-bash">frg session &lt;session-id&gt;
+</code></pre>
+<h2 id="state-persistence"><a class="header" href="#state-persistence">State Persistence</a></h2>
+<p>Sessions maintain state in <code>/tmp/froggr/sessions/</code>:</p>
+<ul>
+<li>Session information files</li>
+<li>Named pipes for IPC</li>
+<li>Recovery data</li>
+<li>Operation logs</li>
+</ul>
+<h2 id="error-handling-1"><a class="header" href="#error-handling-1">Error Handling</a></h2>
+<h3 id="common-issues"><a class="header" href="#common-issues">Common Issues</a></h3>
+<ol>
+<li>
+<p><strong>Dead Sessions</strong></p>
+<ul>
+<li>Automatic detection</li>
+<li>Resource cleanup</li>
+<li>State recovery</li>
+</ul>
+</li>
+<li>
+<p><strong>Resource Leaks</strong></p>
+<ul>
+<li>Periodic validation</li>
+<li>Orphan cleanup</li>
+<li>Resource limits</li>
+</ul>
+</li>
+<li>
+<p><strong>Communication Failures</strong></p>
+<ul>
+<li>Retry mechanisms</li>
+<li>Error reporting</li>
+<li>Fallback options</li>
+</ul>
+</li>
+</ol>
+<h2 id="best-practices-1"><a class="header" href="#best-practices-1">Best Practices</a></h2>
+<ol>
+<li>
+<p><strong>Session Management</strong></p>
+<ul>
+<li>Regular session cleanup</li>
+<li>Monitor active sessions</li>
+<li>Verify session health</li>
+</ul>
+</li>
+<li>
+<p><strong>Resource Usage</strong></p>
+<ul>
+<li>Limit concurrent sessions</li>
+<li>Clean up unused sessions</li>
+<li>Monitor system resources</li>
+</ul>
+</li>
+<li>
+<p><strong>Error Recovery</strong></p>
+<ul>
+<li>Implement proper cleanup</li>
+<li>Handle crashes gracefully</li>
+<li>Maintain state consistency</li>
+</ul>
+</li>
+</ol>
+<h2 id="implementation-details-1"><a class="header" href="#implementation-details-1">Implementation Details</a></h2>
+<h3 id="session-creation"><a class="header" href="#session-creation">Session Creation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example session creation
+let session_manager = SessionManager::new()?;
+let session_id = session_manager.create_session(root_path)?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="state-updates"><a class="header" href="#state-updates">State Updates</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example state update
+session.notify_mount_success(source, target)?;
+session.notify_bind_success(source, target)?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="cleanup"><a class="header" href="#cleanup">Cleanup</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example cleanup
+session_manager.kill_session(session_id)?;
+session_manager.purge_sessions()?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="see-also-1"><a class="header" href="#see-also-1">See Also</a></h2>
+<ul>
+<li><a href="user-guide/design-principles/./mount-operations.html">Mount Operations</a></li>
+<li><a href="user-guide/design-principles/./bind-operations.html">Bind Operations</a></li>
+<li><a href="user-guide/design-principles/./9p-protocol.html">9P Protocol</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="9p-protocol-integration-1"><a class="header" href="#9p-protocol-integration-1">9P Protocol Integration</a></h1>
+<p>The 9P protocol is the foundation of Froggr's filesystem operations, providing a lightweight and efficient way to implement distributed file systems.</p>
+<h2 id="protocol-overview"><a class="header" href="#protocol-overview">Protocol Overview</a></h2>
+<pre><code class="language-mermaid">sequenceDiagram
+    participant Client
+    participant Server
+    participant Filesystem
+
+    Client-&gt;&gt;Server: Tversion
+    Server--&gt;&gt;Client: Rversion
+    Client-&gt;&gt;Server: Tattach
+    Server--&gt;&gt;Client: Rattach
+    
+    loop File Operations
+        Client-&gt;&gt;Server: Twalk
+        Server--&gt;&gt;Client: Rwalk
+        Client-&gt;&gt;Server: Topen
+        Server--&gt;&gt;Client: Ropen
+        Client-&gt;&gt;Server: Tread/Twrite
+        Server-&gt;&gt;Filesystem: Process I/O
+        Filesystem--&gt;&gt;Server: I/O Result
+        Server--&gt;&gt;Client: Rread/Rwrite
+    end
+    
+    Client-&gt;&gt;Server: Tclunk
+    Server--&gt;&gt;Client: Rclunk
+</code></pre>
+<h2 id="key-features-1"><a class="header" href="#key-features-1">Key Features</a></h2>
+<h3 id="message-types"><a class="header" href="#message-types">Message Types</a></h3>
+<ol>
+<li>
+<p><strong>Version &amp; Authentication</strong></p>
+<ul>
+<li>Tversion/Rversion</li>
+<li>Tauth/Rauth</li>
+<li>Tattach/Rattach</li>
+</ul>
+</li>
+<li>
+<p><strong>File Operations</strong></p>
+<ul>
+<li>Twalk/Rwalk</li>
+<li>Topen/Ropen</li>
+<li>Tread/Rread</li>
+<li>Twrite/Rwrite</li>
+</ul>
+</li>
+<li>
+<p><strong>Metadata Operations</strong></p>
+<ul>
+<li>Tstat/Rstat</li>
+<li>Twstat/Rwstat</li>
+<li>Tclunk/Rclunk</li>
+<li>Tremove/Rremove</li>
+</ul>
+</li>
+</ol>
+<h3 id="protocol-characteristics"><a class="header" href="#protocol-characteristics">Protocol Characteristics</a></h3>
+<ul>
+<li>Stateless design</li>
+<li>Simple message format</li>
+<li>Low overhead</li>
+<li>Platform independent</li>
+</ul>
+<h2 id="implementation"><a class="header" href="#implementation">Implementation</a></h2>
+<h3 id="filesystem-setup"><a class="header" href="#filesystem-setup">Filesystem Setup</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Initialize 9P filesystem
+let fs = NineP::new(root_path)?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="message-handling"><a class="header" href="#message-handling">Message Handling</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example message processing
+match message {
+    Tmessage::Walk { fid, newfid, wnames } =&gt; {
+        // Handle walk operation
+    }
+    Tmessage::Read { fid, offset, count } =&gt; {
+        // Handle read operation
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="error-handling-2"><a class="header" href="#error-handling-2">Error Handling</a></h2>
+<h3 id="common-errors"><a class="header" href="#common-errors">Common Errors</a></h3>
+<ol>
+<li>
+<p><strong>Protocol Errors</strong></p>
+<ul>
+<li>Version mismatch</li>
+<li>Authentication failure</li>
+<li>Invalid message format</li>
+</ul>
+</li>
+<li>
+<p><strong>Operation Errors</strong></p>
+<ul>
+<li>Permission denied</li>
+<li>File not found</li>
+<li>I/O errors</li>
+</ul>
+</li>
+<li>
+<p><strong>Connection Errors</strong></p>
+<ul>
+<li>Network timeout</li>
+<li>Connection reset</li>
+<li>Resource exhaustion</li>
+</ul>
+</li>
+</ol>
+<h2 id="performance-considerations"><a class="header" href="#performance-considerations">Performance Considerations</a></h2>
+<h3 id="optimization-techniques"><a class="header" href="#optimization-techniques">Optimization Techniques</a></h3>
+<ol>
+<li>
+<p><strong>Message Batching</strong></p>
+<ul>
+<li>Combine related operations</li>
+<li>Reduce round trips</li>
+<li>Optimize bandwidth usage</li>
+</ul>
+</li>
+<li>
+<p><strong>Caching</strong></p>
+<ul>
+<li>File data caching</li>
+<li>Directory entry caching</li>
+<li>Metadata caching</li>
+</ul>
+</li>
+<li>
+<p><strong>Resource Management</strong></p>
+<ul>
+<li>Resource pooling</li>
+<li>Operation timeouts</li>
+<li>Resource limits</li>
+</ul>
+</li>
+</ol>
+<h2 id="security"><a class="header" href="#security">Security</a></h2>
+<h3 id="security-measures"><a class="header" href="#security-measures">Security Measures</a></h3>
+<ol>
+<li>
+<p><strong>Authentication</strong></p>
+<ul>
+<li>User verification</li>
+<li>Access control</li>
+<li>Capability management</li>
+</ul>
+</li>
+<li>
+<p><strong>Transport Security</strong></p>
+<ul>
+<li>Optional encryption</li>
+<li>Message integrity</li>
+<li>Secure channels</li>
+</ul>
+</li>
+<li>
+<p><strong>Permission Management</strong></p>
+<ul>
+<li>File permissions</li>
+<li>Directory access</li>
+<li>User mapping</li>
+</ul>
+</li>
+</ol>
+<h2 id="best-practices-2"><a class="header" href="#best-practices-2">Best Practices</a></h2>
+<ol>
+<li>
+<p><strong>Protocol Usage</strong></p>
+<ul>
+<li>Follow 9P specifications</li>
+<li>Handle all message types</li>
+<li>Implement proper error handling</li>
+</ul>
+</li>
+<li>
+<p><strong>Performance</strong></p>
+<ul>
+<li>Optimize message handling</li>
+<li>Implement caching</li>
+<li>Monitor resource usage</li>
+</ul>
+</li>
+<li>
+<p><strong>Security</strong></p>
+<ul>
+<li>Implement authentication</li>
+<li>Validate input</li>
+<li>Manage permissions</li>
+</ul>
+</li>
+</ol>
+<h2 id="troubleshooting-1"><a class="header" href="#troubleshooting-1">Troubleshooting</a></h2>
+<p>Common issues and solutions:</p>
+<ol>
+<li>
+<p><strong>Protocol Issues</strong></p>
+<ul>
+<li>Check message format</li>
+<li>Verify protocol version</li>
+<li>Review error responses</li>
+</ul>
+</li>
+<li>
+<p><strong>Performance Problems</strong></p>
+<ul>
+<li>Monitor message patterns</li>
+<li>Check resource usage</li>
+<li>Optimize operations</li>
+</ul>
+</li>
+<li>
+<p><strong>Access Issues</strong></p>
+<ul>
+<li>Verify permissions</li>
+<li>Check authentication</li>
+<li>Review access control</li>
+</ul>
+</li>
+</ol>
+<h2 id="see-also-2"><a class="header" href="#see-also-2">See Also</a></h2>
+<ul>
+<li><a href="user-guide/design-principles/./mount-operations.html">Mount Operations</a></li>
+<li><a href="user-guide/design-principles/./bind-operations.html">Bind Operations</a></li>
+<li><a href="user-guide/design-principles/./session-management.html">Session Management</a></li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="bind-operations"><a class="header" href="#bind-operations">Bind Operations</a></h1>
 <p>The P9 protocol for file systems requires a unique feature called <code>bind</code>, which allows for flexible control over the namespace
 (file hierarchy). The bind operation maps a file, directory, or another namespace tree into a new location in the namespace.</p>
@@ -426,7 +1076,7 @@ frg bind -a /backup/bin /bin
 <li>Original <code>/bin</code> (middle priority)</li>
 <li><code>/backup/bin</code> (lowest priority)</li>
 </ol>
-<h2 id="common-use-cases"><a class="header" href="#common-use-cases">Common Use Cases</a></h2>
+<h2 id="common-use-cases-1"><a class="header" href="#common-use-cases-1">Common Use Cases</a></h2>
 <h3 id="development-environment-1"><a class="header" href="#development-environment-1">Development Environment</a></h3>
 <p>Create a layered development environment:</p>
 <pre><code class="language-shell">frg bind -b /dev/override /usr
@@ -569,6 +1219,8 @@ cd froggr
         <script src="book.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="theme/mermaid.min.js"></script>
+        <script src="theme/mermaid-init.js"></script>
 
         <script>
         window.addEventListener('load', function() {

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Replace Mode - froggr User Guide</title>
+        <title>9P Protocol - froggr User Guide</title>
 
 
         <!-- Custom HTML head -->
@@ -155,34 +155,245 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="replace-mode"><a class="header" href="#replace-mode">Replace Mode</a></h1>
-<p>The Replace mode is the default binding mode in froggr. It completely replaces whatever was previously mounted at the mountpoint with the new source.</p>
-<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
-<pre><code class="language-shell">frg bind src mountpoint
+                        <h1 id="9p-protocol-integration"><a class="header" href="#9p-protocol-integration">9P Protocol Integration</a></h1>
+<p>The 9P protocol is the foundation of Froggr's filesystem operations, providing a lightweight and efficient way to implement distributed file systems.</p>
+<h2 id="protocol-overview"><a class="header" href="#protocol-overview">Protocol Overview</a></h2>
+<pre><code class="language-mermaid">sequenceDiagram
+    participant Client
+    participant Server
+    participant Filesystem
+
+    Client-&gt;&gt;Server: Tversion
+    Server--&gt;&gt;Client: Rversion
+    Client-&gt;&gt;Server: Tattach
+    Server--&gt;&gt;Client: Rattach
+    
+    loop File Operations
+        Client-&gt;&gt;Server: Twalk
+        Server--&gt;&gt;Client: Rwalk
+        Client-&gt;&gt;Server: Topen
+        Server--&gt;&gt;Client: Ropen
+        Client-&gt;&gt;Server: Tread/Twrite
+        Server-&gt;&gt;Filesystem: Process I/O
+        Filesystem--&gt;&gt;Server: I/O Result
+        Server--&gt;&gt;Client: Rread/Rwrite
+    end
+    
+    Client-&gt;&gt;Server: Tclunk
+    Server--&gt;&gt;Client: Rclunk
 </code></pre>
-<h2 id="behavior"><a class="header" href="#behavior">Behavior</a></h2>
-<p>The <code>src</code> completely overrides any existing content at the <code>mountpoint</code>. After the bind operation, only the contents of <code>src</code> will be visible at the specified mountpoint.</p>
-<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
-<h3 id="replacing-configuration-directory"><a class="header" href="#replacing-configuration-directory">Replacing Configuration Directory</a></h3>
-<p>Temporarily replace a default configuration directory with a test version:</p>
-<pre><code class="language-shell">frg bind /test/config /etc
-</code></pre>
-<p>After this command, processes will see <code>/test/config</code> contents instead of the original <code>/etc</code>.</p>
-<h3 id="custom-toolchain"><a class="header" href="#custom-toolchain">Custom Toolchain</a></h3>
-<p>Redirect access to <code>/bin</code> to a custom toolchain directory for development:</p>
-<pre><code class="language-shell">frg bind /custom/tools/bin /bin
-</code></pre>
-<p>This replaces the system binaries with your custom tools.</p>
+<h2 id="key-features"><a class="header" href="#key-features">Key Features</a></h2>
+<h3 id="message-types"><a class="header" href="#message-types">Message Types</a></h3>
+<ol>
+<li>
+<p><strong>Version &amp; Authentication</strong></p>
+<ul>
+<li>Tversion/Rversion</li>
+<li>Tauth/Rauth</li>
+<li>Tattach/Rattach</li>
+</ul>
+</li>
+<li>
+<p><strong>File Operations</strong></p>
+<ul>
+<li>Twalk/Rwalk</li>
+<li>Topen/Ropen</li>
+<li>Tread/Rread</li>
+<li>Twrite/Rwrite</li>
+</ul>
+</li>
+<li>
+<p><strong>Metadata Operations</strong></p>
+<ul>
+<li>Tstat/Rstat</li>
+<li>Twstat/Rwstat</li>
+<li>Tclunk/Rclunk</li>
+<li>Tremove/Rremove</li>
+</ul>
+</li>
+</ol>
+<h3 id="protocol-characteristics"><a class="header" href="#protocol-characteristics">Protocol Characteristics</a></h3>
+<ul>
+<li>Stateless design</li>
+<li>Simple message format</li>
+<li>Low overhead</li>
+<li>Platform independent</li>
+</ul>
+<h2 id="implementation"><a class="header" href="#implementation">Implementation</a></h2>
+<h3 id="filesystem-setup"><a class="header" href="#filesystem-setup">Filesystem Setup</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Initialize 9P filesystem
+let fs = NineP::new(root_path)?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="message-handling"><a class="header" href="#message-handling">Message Handling</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example message processing
+match message {
+    Tmessage::Walk { fid, newfid, wnames } =&gt; {
+        // Handle walk operation
+    }
+    Tmessage::Read { fid, offset, count } =&gt; {
+        // Handle read operation
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h2>
+<h3 id="common-errors"><a class="header" href="#common-errors">Common Errors</a></h3>
+<ol>
+<li>
+<p><strong>Protocol Errors</strong></p>
+<ul>
+<li>Version mismatch</li>
+<li>Authentication failure</li>
+<li>Invalid message format</li>
+</ul>
+</li>
+<li>
+<p><strong>Operation Errors</strong></p>
+<ul>
+<li>Permission denied</li>
+<li>File not found</li>
+<li>I/O errors</li>
+</ul>
+</li>
+<li>
+<p><strong>Connection Errors</strong></p>
+<ul>
+<li>Network timeout</li>
+<li>Connection reset</li>
+<li>Resource exhaustion</li>
+</ul>
+</li>
+</ol>
+<h2 id="performance-considerations"><a class="header" href="#performance-considerations">Performance Considerations</a></h2>
+<h3 id="optimization-techniques"><a class="header" href="#optimization-techniques">Optimization Techniques</a></h3>
+<ol>
+<li>
+<p><strong>Message Batching</strong></p>
+<ul>
+<li>Combine related operations</li>
+<li>Reduce round trips</li>
+<li>Optimize bandwidth usage</li>
+</ul>
+</li>
+<li>
+<p><strong>Caching</strong></p>
+<ul>
+<li>File data caching</li>
+<li>Directory entry caching</li>
+<li>Metadata caching</li>
+</ul>
+</li>
+<li>
+<p><strong>Resource Management</strong></p>
+<ul>
+<li>Resource pooling</li>
+<li>Operation timeouts</li>
+<li>Resource limits</li>
+</ul>
+</li>
+</ol>
+<h2 id="security"><a class="header" href="#security">Security</a></h2>
+<h3 id="security-measures"><a class="header" href="#security-measures">Security Measures</a></h3>
+<ol>
+<li>
+<p><strong>Authentication</strong></p>
+<ul>
+<li>User verification</li>
+<li>Access control</li>
+<li>Capability management</li>
+</ul>
+</li>
+<li>
+<p><strong>Transport Security</strong></p>
+<ul>
+<li>Optional encryption</li>
+<li>Message integrity</li>
+<li>Secure channels</li>
+</ul>
+</li>
+<li>
+<p><strong>Permission Management</strong></p>
+<ul>
+<li>File permissions</li>
+<li>Directory access</li>
+<li>User mapping</li>
+</ul>
+</li>
+</ol>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li>
+<p><strong>Protocol Usage</strong></p>
+<ul>
+<li>Follow 9P specifications</li>
+<li>Handle all message types</li>
+<li>Implement proper error handling</li>
+</ul>
+</li>
+<li>
+<p><strong>Performance</strong></p>
+<ul>
+<li>Optimize message handling</li>
+<li>Implement caching</li>
+<li>Monitor resource usage</li>
+</ul>
+</li>
+<li>
+<p><strong>Security</strong></p>
+<ul>
+<li>Implement authentication</li>
+<li>Validate input</li>
+<li>Manage permissions</li>
+</ul>
+</li>
+</ol>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<p>Common issues and solutions:</p>
+<ol>
+<li>
+<p><strong>Protocol Issues</strong></p>
+<ul>
+<li>Check message format</li>
+<li>Verify protocol version</li>
+<li>Review error responses</li>
+</ul>
+</li>
+<li>
+<p><strong>Performance Problems</strong></p>
+<ul>
+<li>Monitor message patterns</li>
+<li>Check resource usage</li>
+<li>Optimize operations</li>
+</ul>
+</li>
+<li>
+<p><strong>Access Issues</strong></p>
+<ul>
+<li>Verify permissions</li>
+<li>Check authentication</li>
+<li>Review access control</li>
+</ul>
+</li>
+</ol>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="./mount-operations.html">Mount Operations</a></li>
+<li><a href="./bind-operations.html">Bind Operations</a></li>
+<li><a href="./session-management.html">Session Management</a></li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../../user-guide/bind.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../user-guide/design-principles/session-management.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../../user-guide/bind-modes/before.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../user-guide/bind.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -192,11 +403,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../../user-guide/bind.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../user-guide/design-principles/session-management.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../../user-guide/bind-modes/before.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../user-guide/bind.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
