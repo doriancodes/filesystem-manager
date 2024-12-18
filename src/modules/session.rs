@@ -23,6 +23,8 @@ use nix::unistd::Pid;
 use tokio::signal::ctrl_c;
 use parking_lot::RwLock;
 use crate::BindMode;
+use nix::libc::{posix_spawn, posix_spawnattr_t, posix_spawn_file_actions_t};
+use std::ffi::CString;
 
 /// Information about a running filesystem session.
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,54 +98,80 @@ impl SessionManager {
         let session_id = Uuid::new_v4().to_string();
         info!("Generated new session ID: {}", session_id);
         
-        info!("Attempting to fork process...");
-        let fork_result = unsafe { fork() };
-        info!("Fork completed");
+        // Prepare arguments for the new process
+        let program = CString::new(std::env::current_exe()?.to_str().unwrap())?;
+        let mut args = vec![
+            CString::new(program.to_str().unwrap())?,
+            CString::new("internal-session")?,
+            CString::new(session_id.as_str())?,
+            CString::new(root.to_str().unwrap())?
+        ];
         
-        match fork_result {
-            Ok(ForkResult::Parent { child }) => {
-                info!("In parent process. Child PID: {}", child);
-                let session_info = SessionInfo {
-                    id: session_id.clone(),
-                    pid: child.as_raw(),
-                    root: root.clone(),
-                    mounts: Vec::new(),
-                    binds: Vec::new(),
-                };
-                
-                let session_file = self.sessions_dir.join(&session_id);
-                info!("Saving session info to: {}", session_file.display());
-                match fs::write(&session_file, serde_json::to_string(&session_info)?) {
-                    Ok(_) => info!("Session info saved successfully"),
-                    Err(e) => error!("Failed to save session info: {}", e),
-                }
-                
-                info!("Parent process completed successfully");
-                Ok(session_id)
-            }
-            Ok(ForkResult::Child) => {
-                info!("In child process");
-                
-                // Create the pipe immediately
-                let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
-                info!("Creating pipe at: {}", pipe_path.display());
-                if !pipe_path.exists() {
-                    match nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU) {
-                        Ok(_) => info!("Pipe created successfully"),
-                        Err(e) => error!("Failed to create pipe: {}", e),
-                    }
-                }
-
-                info!("Child process entering main loop");
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                }
-            }
-            Err(e) => {
-                error!("Fork failed with error: {}", e);
-                Err(anyhow::anyhow!("Fork failed: {}", e))
-            }
+        // Create a vector of pointers to the args
+        let mut arg_ptrs: Vec<*mut libc::c_char> = args
+            .iter_mut()
+            .map(|arg| arg.as_ptr() as *mut libc::c_char)
+            .collect();
+        arg_ptrs.push(std::ptr::null_mut());
+        
+        let mut pid: libc::pid_t = 0;
+        let mut attr: posix_spawnattr_t = unsafe { std::mem::zeroed() };
+        let mut actions: posix_spawn_file_actions_t = unsafe { std::mem::zeroed() };
+        
+        // Initialize the attributes
+        unsafe {
+            libc::posix_spawnattr_init(&mut attr);
+            
+            // Set flags to make the process independent
+            let flags: libc::c_short = libc::POSIX_SPAWN_SETPGROUP as libc::c_short;  // Convert to correct type
+            libc::posix_spawnattr_setflags(&mut attr, flags);
+            
+            // Set process group ID to 0 to create new group
+            libc::posix_spawnattr_setpgroup(&mut attr, 0);
         }
+        
+        info!("Spawning new process...");
+        let result = unsafe {
+            posix_spawn(
+                &mut pid,
+                program.as_ptr(),
+                &actions,
+                &attr,
+                arg_ptrs.as_ptr(),
+                std::ptr::null()
+            )
+        };
+
+        // Clean up
+        unsafe {
+            libc::posix_spawnattr_destroy(&mut attr);
+            libc::posix_spawn_file_actions_destroy(&mut actions);
+        }
+
+        if result != 0 {
+            error!("posix_spawn failed with error: {}", result);
+            return Err(anyhow::anyhow!("Failed to spawn process: {}", result));
+        }
+
+        info!("Process spawned with PID: {}", pid);
+        
+        let session_info = SessionInfo {
+            id: session_id.clone(),
+            pid,
+            root: root.clone(),
+            mounts: Vec::new(),
+            binds: Vec::new(),
+        };
+        
+        let session_file = self.sessions_dir.join(&session_id);
+        info!("Saving session info to: {}", session_file.display());
+        match fs::write(&session_file, serde_json::to_string(&session_info)?) {
+            Ok(_) => info!("Session info saved successfully"),
+            Err(e) => error!("Failed to save session info: {}", e),
+        }
+        
+        info!("Parent process completed successfully");
+        Ok(session_id)
     }
 
     /// Lists all active sessions.

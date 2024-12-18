@@ -4,7 +4,11 @@ use froggr::modules::namespace::BindMode;
 use froggr::modules::session::SessionManager;
 use log::{debug, error, info};
 use std::path::PathBuf;
+use froggr::session::Session;
+use std::path::Path;
 use env_logger;
+use nix::unistd::mkfifo;
+use nix::sys::stat::Mode;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -61,6 +65,12 @@ enum Commands {
         purge: bool,
         /// Session ID (required for kill and show operations)
         session_id: Option<String>,
+    },
+    /// Internal command for running a session process
+    #[clap(hide = true)]
+    InternalSession {
+        session_id: String,
+        root: PathBuf,
     },
 }
 
@@ -167,6 +177,19 @@ async fn main() -> Result<()> {
                 } else {
                     println!("Session not found: {}", id);
                 }
+            }
+        }
+        Commands::InternalSession { session_id, root } => {
+            info!("Starting session process for ID: {}", session_id);
+            let pipe_path = format!("/tmp/froggr/sessions/{}.pipe", session_id);
+            let pipe_path = Path::new(&pipe_path);
+            if !pipe_path.exists() {
+                mkfifo(pipe_path, Mode::S_IRWXU)?;
+            }
+            
+            // Run command listener loop
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
             }
         }
     }
