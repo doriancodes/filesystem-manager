@@ -9,7 +9,7 @@ use super::constants::BLOCK_SIZE;
 use super::namespace::{BindMode, NamespaceEntry};
 use super::proto::{BoundEntry, NineP};
 use anyhow::{anyhow, Result};
-use fuser::{FileAttr, FileType};
+use fuser::{FileAttr, FileType, MountOption};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ffi::CString;
@@ -17,10 +17,11 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
-use log::{info, debug, warn};
+use log::{info, debug, warn, error};
 use std::cell::RefCell;
 use std::sync::Arc;
 use crate::session::Session;
+use std::thread;
 
 #[cfg(target_os = "macos")]
 extern "C" {
@@ -38,7 +39,7 @@ extern "C" {
 }
 
 /// Manages filesystem mounting and binding operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FilesystemManager {
     /// The underlying 9P filesystem implementation.
     pub fs: NineP,
@@ -335,47 +336,65 @@ impl FilesystemManager {
     pub fn mount(&self, source: &Path, target: &Path, node_id: &str) -> Result<()> {
         info!("Mounting {} to {} for node {}", source.display(), target.display(), node_id);
         
-        // Resolve paths
+        // Check if we have a current session
+        debug!("Checking current session...");
+        if let Some(session) = self.get_session() {
+            info!("Found existing session: {:?}", session);
+        } else {
+            warn!("No current session found before mount");
+        }
+        
+        debug!("Checking paths...");
         let abs_source = fs::canonicalize(source)?;
         let abs_target = fs::canonicalize(target)?;
+        
         info!("Resolved paths - source: {:?}, target: {:?}", abs_source, abs_target);
 
         // Verify paths exist
         if !abs_source.exists() {
+            error!("Source path does not exist: {:?}", abs_source);
             return Err(anyhow!("Source path does not exist: {:?}", abs_source));
         }
         if !abs_target.exists() {
+            error!("Target path does not exist: {:?}", abs_target);
             return Err(anyhow!("Target path does not exist: {:?}", abs_target));
         }
 
-        // Create mount entry
+        thread::sleep(std::time::Duration::from_millis(100));
+
+        // Update namespace first
+        debug!("Updating namespace...");
         let entry = NamespaceEntry {
             source: abs_source.clone(),
             target: abs_target.clone(),
-            bind_mode: BindMode::Before, // Default mode for mounts
+            bind_mode: BindMode::Before,
             remote_node: Some(node_id.to_string()),
         };
 
         // Update namespace
+        debug!("Updating namespace...");
         let mut namespace = self.fs.namespace_manager.namespace.write().unwrap();
         namespace
             .entry(abs_target.clone())
             .or_insert_with(Vec::new)
             .push(entry);
-
-        // Perform the mount operation
-        self.mount_directory(abs_target.to_str().unwrap(), &abs_source)?;
+        
+        // Update bindings
+        self.update_bindings(abs_target.to_str().unwrap(), &abs_source)?;
 
         // Notify session of successful mount
         info!("Mount operation successful, notifying session");
-        if let Some(session) = FilesystemManager::get_current_session() {
+        if let Some(session) = self.get_session() {
             info!("Found current session, sending notification");
-            session.notify_mount_success(source.to_path_buf(), target.to_path_buf())?;
-            info!("Mount success notification sent");
+            match session.notify_mount_success(source.to_path_buf(), target.to_path_buf()) {
+                Ok(_) => info!("Mount success notification sent"),
+                Err(e) => warn!("Failed to send mount notification: {:?}", e),
+            }
         } else {
             warn!("No current session found for mount notification");
         }
 
+        info!("Mount operation completed successfully");
         Ok(())
     }
 
@@ -481,6 +500,38 @@ impl FilesystemManager {
             "Resolved paths - source: {:?}, target: {:?}",
             abs_source, abs_target
         );
+
+        // Clear existing bindings but keep root
+        bindings.retain(|&ino, _| ino == 1);
+
+        // Read source directory recursively
+        self.read_directory_entries_recursive(
+            &abs_source,
+            &abs_source,
+            1,
+            &mut next_inode,
+            &mut bindings,
+        )?;
+
+        info!("Final bindings: {:?}", bindings.keys().collect::<Vec<_>>());
+        for (inode, (name, entry)) in bindings.iter() {
+            debug!(
+                "inode: {}, name: {:?}, kind: {:?}",
+                inode, name, entry.attr.kind
+            );
+        }
+        Ok(())
+    }
+
+    fn update_bindings(&self, dir_path: &str, source_path: &Path) -> Result<()> {
+        debug!("Updating bindings for: {} from source: {:?}", dir_path, source_path);
+
+        let mut bindings = self.fs.namespace_manager.bindings.lock().unwrap();
+        let mut next_inode = self.fs.namespace_manager.next_inode.lock().unwrap();
+
+        // Convert paths to absolute paths
+        let abs_source = fs::canonicalize(source_path)?;
+        let abs_target = fs::canonicalize(Path::new(dir_path))?;
 
         // Clear existing bindings but keep root
         bindings.retain(|&ino, _| ino == 1);

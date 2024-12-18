@@ -2,8 +2,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use froggr::modules::namespace::BindMode;
 use froggr::modules::session::SessionManager;
-use log::{error, info};
+use log::{debug, error, info};
 use std::path::PathBuf;
+use env_logger;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -65,7 +66,17 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize the logger at the start of main
+    env_logger::init();
+    
+    info!("Froggr starting up");
+    
     let cli = Cli::parse();
+    
+    if cli.verbose {
+        debug!("Verbose mode enabled");
+    }
+    
     let session_manager = SessionManager::new()?;
 
     match &cli.command {
@@ -93,13 +104,17 @@ async fn main() -> Result<()> {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
         Commands::Mount { source, mount_point, node_id } => {
-            info!("Starting mount operation");
+            info!("Starting mount operation in process {}", std::process::id());
             let session_manager = SessionManager::new()?;
+            info!("Created session manager");
+            
             let session_id = session_manager.create_session(mount_point.clone())?;
+            info!("Created session: {}", session_id);
             println!("Created new session: {}", session_id);
 
-            if let Some(session_info) = session_manager.get_session(&session_id)? {
-                info!("Found session with PID {}", session_info.pid);
+            if let Some(session) = session_manager.get_session(&session_id)? {
+                info!("Found session with PID {}", session.pid);
+                info!("Sending mount command...");
                 session_manager.send_mount_command(
                     &session_id,
                     source.clone(),
@@ -107,15 +122,13 @@ async fn main() -> Result<()> {
                     node_id.clone()
                 )?;
                 info!("Mount command sent to session");
-                
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                
-                if let Some(updated_info) = session_manager.get_session(&session_id)? {
-                    info!("Current mounts: {:?}", updated_info.mounts);
-                }
             } else {
                 error!("No session found for mount operation");
             }
+
+            info!("Waiting for mount operation to complete");
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            info!("Mount operation completed");
         }
         Commands::Session { list, kill, purge, session_id } => {
             if *list {

@@ -8,7 +8,7 @@
 
 use crate::FilesystemManager;
 use anyhow::Result;
-use log::{error, info};
+use log::{error, info, warn};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -70,16 +70,20 @@ impl SessionManager {
     /// * `Ok(String)` - Session ID of the created session
     /// * `Err` if session creation fails
     pub fn create_session(&self, root: PathBuf) -> Result<String> {
+        info!("Creating new session for root: {}", root.display());
+        
         // First, check if there's an existing session for this root
+        info!("Checking for existing sessions...");
         let existing_sessions = self.list_sessions()?;
         for session in existing_sessions {
             if session.root == root {
-                // Verify the session is still active by checking the process
+                info!("Found existing session {} for root {}", session.id, root.display());
+                // Verify the session is still active
                 if let Ok(_) = signal::kill(Pid::from_raw(session.pid), Signal::SIGCONT) {
-                    info!("Reusing existing session {} for root {}", session.id, root.display());
+                    info!("Reusing existing session {}", session.id);
                     return Ok(session.id);
                 } else {
-                    // Session is dead, remove its file and continue to create new session
+                    info!("Existing session is dead, removing it");
                     let session_file = self.sessions_dir.join(&session.id);
                     if let Err(e) = fs::remove_file(session_file) {
                         error!("Failed to remove dead session file: {}", e);
@@ -88,11 +92,17 @@ impl SessionManager {
             }
         }
 
-        // If no existing valid session found, create a new one
+        info!("No existing session found, creating new one");
         let session_id = Uuid::new_v4().to_string();
+        info!("Generated new session ID: {}", session_id);
         
-        match unsafe { fork() } {
+        info!("Attempting to fork process...");
+        let fork_result = unsafe { fork() };
+        info!("Fork completed");
+        
+        match fork_result {
             Ok(ForkResult::Parent { child }) => {
+                info!("In parent process. Child PID: {}", child);
                 let session_info = SessionInfo {
                     id: session_id.clone(),
                     pid: child.as_raw(),
@@ -102,42 +112,37 @@ impl SessionManager {
                 };
                 
                 let session_file = self.sessions_dir.join(&session_id);
-                fs::write(&session_file, serde_json::to_string(&session_info)?)?;
+                info!("Saving session info to: {}", session_file.display());
+                match fs::write(&session_file, serde_json::to_string(&session_info)?) {
+                    Ok(_) => info!("Session info saved successfully"),
+                    Err(e) => error!("Failed to save session info: {}", e),
+                }
                 
-                // Wait a moment for the child process to set up
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                
-                info!("Created new session: {} for root {}", session_id, root.display());
+                info!("Parent process completed successfully");
                 Ok(session_id)
             }
             Ok(ForkResult::Child) => {
-                let runtime = tokio::runtime::Runtime::new()?;
-                let session = Session::new(root.clone(), session_id.clone())?;
-                let session_clone = session.clone();
-
-                FilesystemManager::set_current_session(session.clone());
-
-                info!("Session stored in thread-local storage");
-
+                info!("In child process");
+                
                 // Create the pipe immediately
                 let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
+                info!("Creating pipe at: {}", pipe_path.display());
                 if !pipe_path.exists() {
-                    nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU)?;
+                    match nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU) {
+                        Ok(_) => info!("Pipe created successfully"),
+                        Err(e) => error!("Failed to create pipe: {}", e),
+                    }
                 }
 
-                std::thread::spawn(move || {
-                    runtime.block_on(async {
-                        if let Err(e) = session_clone.run().await {
-                            error!("Session error: {}", e);
-                        }
-                    });
-                });
-                
+                info!("Child process entering main loop");
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
-            Err(e) => Err(anyhow::anyhow!("Fork failed: {}", e)),
+            Err(e) => {
+                error!("Fork failed with error: {}", e);
+                Err(anyhow::anyhow!("Fork failed: {}", e))
+            }
         }
     }
 
@@ -147,15 +152,43 @@ impl SessionManager {
     /// * `Ok(Vec<SessionInfo>)` - Information about all active sessions
     /// * `Err` if reading session information fails
     pub fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
+        info!("Starting to list sessions from: {}", self.sessions_dir.display());
         let mut sessions = Vec::new();
-        for entry in fs::read_dir(&self.sessions_dir)? {
-            let entry = entry?;
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                if let Ok(info) = serde_json::from_str(&content) {
-                    sessions.push(info);
+        
+        match fs::read_dir(&self.sessions_dir) {
+            Ok(entries) => {
+                info!("Successfully read sessions directory");
+                for entry_result in entries {
+                    match entry_result {
+                        Ok(entry) => {
+                            info!("Processing entry: {:?}", entry.path());
+                            if entry.path().extension().map_or(false, |ext| ext == "json") {
+                                match fs::read_to_string(entry.path()) {
+                                    Ok(content) => {
+                                        info!("Read session file content");
+                                        match serde_json::from_str(&content) {
+                                            Ok(info) => {
+                                                info!("Successfully parsed session info");
+                                                sessions.push(info);
+                                            }
+                                            Err(e) => error!("Failed to parse session info: {}", e),
+                                        }
+                                    }
+                                    Err(e) => error!("Failed to read session file: {}", e),
+                                }
+                            }
+                        }
+                        Err(e) => error!("Failed to process directory entry: {}", e),
+                    }
                 }
             }
+            Err(e) => {
+                error!("Failed to read sessions directory: {}", e);
+                return Err(anyhow::anyhow!("Failed to read sessions directory: {}", e));
+            }
         }
+        
+        info!("Found {} sessions", sessions.len());
         Ok(sessions)
     }
 
@@ -307,23 +340,45 @@ impl SessionManager {
     /// * `Err` if the session doesn't exist or the command couldn't be sent
     pub fn send_mount_command(&self, session_id: &str, source: PathBuf, target: PathBuf, node_id: String) -> Result<()> {
         info!("Sending mount command to session {}", session_id);
-        if let Some(session) = self.get_session(session_id)? {
-            // Create a named pipe or socket for IPC
-            let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
-            if !pipe_path.exists() {
-                nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU)?;
-            }
+        if let Some(active_session) = self.get_active_session(session_id)? {
+            // Fork before mounting
+            match unsafe { fork() }? {
+                ForkResult::Parent { child } => {
+                    info!("Started mount process with PID: {}", child);
+                    
+                    // Continue with sending the command through the pipe
+                    let pipe_path = self.sessions_dir.join(format!("{}.pipe", session_id));
+                    if !pipe_path.exists() {
+                        nix::unistd::mkfifo(&pipe_path, nix::sys::stat::Mode::S_IRWXU)?;
+                    }
 
-            // Write the mount command to the pipe
-            let command = SessionCommand::Mount {
-                source,
-                target,
-                node_id,
-            };
-            let command_str = serde_json::to_string(&command)?;
-            fs::write(&pipe_path, command_str)?;
-            info!("Mount command sent through pipe");
-            Ok(())
+                    let command = SessionCommand::Mount {
+                        source,
+                        target,
+                        node_id,
+                    };
+                    let command_str = serde_json::to_string(&command)?;
+                    
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&pipe_path)?;
+                    
+                    use std::io::Write;
+                    file.write_all(command_str.as_bytes())?;
+                    
+                    info!("Mount command sent through pipe");
+                    Ok(())
+                }
+                ForkResult::Child => {
+                    // Child process handles the FUSE mount
+                    let fs_manager = active_session.fs_manager.clone();
+                    if let Err(e) = fs_manager.mount(&source, &target, &node_id) {
+                        error!("Mount failed in child process: {}", e);
+                        std::process::exit(1);
+                    }
+                    std::process::exit(0);
+                }
+            }
         } else {
             Err(anyhow::anyhow!("Session not found"))
         }
@@ -384,6 +439,7 @@ enum SessionMessage {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Session {
     /// The filesystem manager instance
     pub fs_manager: FilesystemManager,
@@ -684,9 +740,18 @@ impl Session {
     /// * `Ok(())` if shutdown was successful
     /// * `Err` if there was an error during shutdown
     pub fn shutdown(&self) -> Result<()> {
-        info!("Shutting down session");
-        self.message_tx.send(SessionMessage::Shutdown)?;
+        info!("Shutting down session...");
         self.is_running.store(false, Ordering::SeqCst);
+        
+        // Send shutdown message
+        self.message_tx.send(SessionMessage::Shutdown)?;
+        
+        // Clean up session file
+        let session_file = format!("/tmp/froggr/sessions/{}", self.state.read().id);
+        if let Err(e) = fs::remove_file(&session_file) {
+            warn!("Failed to remove session file: {}", e);
+        }
+        
         Ok(())
     }
 
@@ -853,19 +918,6 @@ impl Session {
         })?;
         info!("Mount message sent successfully");
         Ok(())
-    }
-}
-
-/// Implements cleanup on drop.
-///
-/// When a Session is dropped, it ensures the message processing thread
-/// is properly shut down.
-impl Drop for Session {
-    fn drop(&mut self) {
-        self.is_running.store(false, Ordering::SeqCst);
-        if let Err(e) = self.message_tx.send(SessionMessage::Shutdown) {
-            error!("Error sending shutdown message: {}", e);
-        }
     }
 }
 
