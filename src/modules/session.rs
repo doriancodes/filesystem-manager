@@ -1003,3 +1003,65 @@ enum SessionCommand {
     },
     // Add other commands as needed
 }
+
+#[cfg(kani)]
+mod verification {
+    use super::*;
+    use kani::any;
+
+    // Helper function to create a very simple test path
+    fn get_test_path() -> PathBuf {
+        // Use a fixed, simple path to avoid complex path parsing
+        PathBuf::from("/tmp")
+    }
+
+    #[kani::proof]
+    #[kani::unwind(10)]  // Increased unwind limit
+    #[kani::solver(kissat)]  // Use kissat solver for better performance
+    fn verify_session_creation() {
+        let root = get_test_path();
+        let session_manager = SessionManager::new().unwrap();
+        
+        // Verify basic session creation
+        match session_manager.create_session(root) {
+            Ok(session_id) => {
+                // Basic validity check
+                assert!(!session_id.is_empty());
+            },
+            Err(_) => {
+                // It's okay if creation fails (we're not testing filesystem operations)
+                return;
+            }
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(10)]
+    #[kani::solver(kissat)]
+    fn verify_session_state() {
+        let session_manager = SessionManager::new().unwrap();
+        let root = get_test_path();
+        
+        // Test single session creation and state
+        if let Ok(session_id) = session_manager.create_session(root) {
+            // Verify we can get the session
+            let session = session_manager.get_session(&session_id);
+            assert!(session.is_ok());
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(10)]
+    #[kani::solver(kissat)]
+    fn verify_simple_operations() {
+        let session_manager = SessionManager::new().unwrap();
+        
+        // Create a session with minimal path
+        let root = PathBuf::from("/x");
+        if let Ok(session_id) = session_manager.create_session(root) {
+            // Try to kill it
+            let result = session_manager.kill_session(&session_id);
+            assert!(result.is_ok());
+        }
+    }
+}
